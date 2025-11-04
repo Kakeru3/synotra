@@ -1,6 +1,3 @@
-// codegen: simple IR (.syi) emitter that converts AST to a textual IR
-// This replaces the previous inkwell-based LLVM backend.
-
 use crate::ast::Task;
 use crate::ast::{Expr, Function, Prototype};
 use anyhow::{Result, anyhow};

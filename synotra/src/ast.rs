@@ -1,7 +1,3 @@
-// AST（抽象構文木）を定義するファイル
-// - `Expr`, `Prototype`, `Function` が言語の基本構造を表します。
-// - parser がここで定義した型を生成し、codegen がそれを LLVM IR に変換します。
-
 use std::fmt;
 
 #[derive(Clone, Debug)]

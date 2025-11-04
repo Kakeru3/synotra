@@ -9,7 +9,7 @@
 ## 🎯 Goal
 
 - Run your code across multiple processes **without complex cluster setup**  
-- Designed with a Rust/Kotlin-like syntax for readability  
+- Designed with a Swift/Kotlin-like syntax for readability  
 - Built-in language support for distributed and cooperative tasks, making it safe and efficient on supercomputers or multi-node environments  
 
 ---

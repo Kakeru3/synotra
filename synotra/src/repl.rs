@@ -1,6 +1,6 @@
-// REPL とファイル実行の入口
-// - `run_repl` は対話的に1行ずつ読み process_line を呼ぶ
-// - `run_file` はファイルを読み、各行を process_line で処理する
+// REPLおよびファイル実行モードの実装
+// cargo run で REPL を起動
+// cargo run -- <file.sy> でファイル実行
 
 use crate::codegen::CodeGen;
 use crate::parser::Parser;

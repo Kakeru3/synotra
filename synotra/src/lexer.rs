@@ -1,6 +1,3 @@
-// Lexer: 入力文字列をトークン列に変換します。
-// トークン定義は `token.rs` に分離されています。
-
 use crate::token::Token;
 
 #[derive(Clone, Debug)]

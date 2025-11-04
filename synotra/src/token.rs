@@ -1,6 +1,3 @@
-// token.rs: トークン定義を分離しました。
-// Lexer はトークンを生成し、Parser はトークンを消費します。
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Eof,
