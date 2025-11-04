@@ -1,2 +1,10 @@
 synotra/target
 syvm/target
+
+.DS_Store
+synotra/.DS_Store
+syvm/.DS_Store
+
+.todo
+synotra/.todo
+syvm/.todo
