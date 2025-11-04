@@ -1,0 +1,26 @@
+task main() distributed {
+    val n = 100
+
+    // FizzBuzz タスクを呼び出す
+    // distributed により複数ノードで冗長化可能
+    fizzbuzz(n)
+}
+
+task fizzbuzz(n: Int) distributed {
+    fun fizzbuzzValue(i: Int): String {
+        if i % 15 == 0 {
+            return "FizzBuzz"
+        } else if i % 3 == 0 {
+            return "Fizz"
+        } else if i % 5 == 0 {
+            return "Buzz"
+        } else {
+            return i.toString()
+        }
+    }
+
+    for i in 1..n do {
+        let result = fizzbuzzValue(i)
+        print(result)
+    }
+}

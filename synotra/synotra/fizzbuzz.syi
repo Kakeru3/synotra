@@ -1,0 +1,45 @@
+@task main
+  mode distributed
+  body
+    val n = literal 100
+    call fizzbuzz args [n]
+
+@task fizzbuzz
+  mode distributed
+  params
+    n: Int
+  body
+    @function fizzbuzzValue
+      args [i]
+      body
+      if
+        binary "="
+          binary "%"
+            var i
+            literal 15
+          literal 0
+      then
+        return literal "FizzBuzz"
+      else
+        if
+          binary "="
+            binary "%"
+              var i
+              literal 3
+            literal 0
+        then
+          return literal "Fizz"
+        else
+          if
+            binary "="
+              binary "%"
+                var i
+                literal 5
+              literal 0
+          then
+            return literal "Buzz"
+          else
+            return call toString args [i]
+    for i in 1..n do
+      let result = call fizzbuzzValue args [i]
+      call print args [result]
