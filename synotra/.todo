@@ -1,5 +1,0 @@
-- [ ] Add Token::Val and lexing support
-- [ ] Extend AST for Val declaration and update parser
-- [ ] Update codegen for val expressions and task calls
-- [ ] Ensure parser/codegen support task invocation syntax
-- [ ] Run cargo build and sample file generation
