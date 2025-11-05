@@ -79,7 +79,7 @@ pub fn run_repl() -> Result<()> {
                                     let out_dir = std::path::Path::new(".");
                                     let path = out_dir.join(format!("{}.syi", t.name));
                                     match codegen.codegen_task_to_path(&t, &path) {
-                                        Ok(p) => println!("wrote .syi file: {}", p),
+                                        Ok(p) => eprintln!("wrote .syi file: {}", p),
                                         Err(e) => println!("codegen error: {}", e),
                                     }
                                 }
@@ -147,8 +147,8 @@ fn process_line(line: &str, codegen: &mut CodeGen) {
                             let out_dir = std::path::Path::new(".");
                             let path = out_dir.join(format!("{}.syi", t.name));
                             match codegen.codegen_task_to_path(&t, &path) {
-                                Ok(p) => println!("wrote .syi file: {}", p),
-                                Err(e) => println!("codegen error: {}", e),
+                                Ok(p) => eprintln!("wrote .syi file: {}", p),
+                                Err(e) => eprintln!("codegen error: {}", e),
                             }
                         }
                     }
@@ -221,7 +221,7 @@ pub fn run_file(path: &Path) -> Result<()> {
         let out_path = out_dir.join(file_name);
         let joined = rendered_tasks.join("\n");
         fs::write(&out_path, joined)?;
-        println!("wrote .syi file: {}", out_path.display());
+        eprintln!("wrote .syi file: {}", out_path.display());
     }
     Ok(())
 }

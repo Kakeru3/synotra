@@ -141,7 +141,24 @@ impl CodeGen {
                 out.push(format!("{}var {}", pad, name));
             }
             Expr::Binary(op, lhs, rhs) => {
-                out.push(format!("{}binary \"{}\"", pad, op));
+                // 演算子文字をsyi形式の文字列に変換
+                let op_str = match op {
+                    '*' => "*",
+                    '/' => "/",
+                    '%' => "%",
+                    '+' => "+",
+                    '-' => "-",
+                    '<' => "<",
+                    '>' => ">",
+                    'l' => "<=",  // LessEqual
+                    'g' => ">=",  // GreaterEqual
+                    '=' => "==",  // EqualEqual
+                    'n' => "!=",  // NotEqual
+                    '&' => "&&",  // And
+                    '|' => "||",  // Or
+                    _ => "?",     // Unknown operator
+                };
+                out.push(format!("{}binary \"{}\"", pad, op_str));
                 self.emit_expr_into(lhs, indent + 1, out)?;
                 self.emit_expr_into(rhs, indent + 1, out)?;
             }
@@ -154,7 +171,21 @@ impl CodeGen {
                 self.emit_expr_into(else_e, indent + 1, out)?;
             }
             Expr::Call { name, args } => {
-                out.push(self.render_call_line(&pad, name, args));
+                // 引数が単純な場合（変数、数値、文字列のみ）は1行で出力
+                let all_simple = args.iter().all(|arg| matches!(arg, Expr::Variable(_) | Expr::Number(_) | Expr::String(_)));
+                
+                if all_simple {
+                    out.push(self.render_call_line(&pad, name, args));
+                } else {
+                    // 複雑な引数がある場合は展開する
+                    out.push(format!("{}call {}", pad, name));
+                    if !args.is_empty() {
+                        out.push(format!("{}  args", pad));
+                        for arg in args {
+                            self.emit_expr_into(arg, indent + 2, out)?;
+                        }
+                    }
+                }
             }
             Expr::String(s) => {
                 out.push(format!("{}literal \"{}\"", pad, s));
@@ -206,6 +237,26 @@ impl CodeGen {
                     self.emit_expr_into(stmt, indent + 1, out)?;
                 }
             }
+            Expr::While { condition, body } => {
+                // emit while header
+                let mut hdr = format!("{}while ", pad);
+                // try to inline the condition if simple
+                if let Some(inline_cond) = self.inline_expr(condition) {
+                    hdr.push_str(&inline_cond);
+                } else {
+                    hdr.push_str("condition");
+                }
+                hdr.push_str(" do");
+                out.push(hdr);
+                // emit condition if not inlined
+                if self.inline_expr(condition).is_none() {
+                    self.emit_expr_into(condition, indent + 1, out)?;
+                }
+                // emit body statements
+                for stmt in body.iter() {
+                    self.emit_expr_into(stmt, indent + 1, out)?;
+                }
+            }
             Expr::Block(stmts) => {
                 for s in stmts.iter() {
                     self.emit_expr_into(s, indent, out)?;
@@ -222,12 +273,13 @@ impl CodeGen {
             Expr::Function { proto, body } => {
                 // reuse the same format as codegen_function
                 out.push(format!("{}@function {}", pad, proto.name));
+                let inner_pad = "  ".repeat(indent + 1);
                 if !proto.args.is_empty() {
                     let args_repr = format!("[{}]", proto.args.join(", "));
-                    out.push(format!("{}  args {}", pad, args_repr));
+                    out.push(format!("{}args {}", inner_pad, args_repr));
                 }
-                out.push(format!("{}  body", pad));
-                self.emit_expr_into(body, indent + 1, out)?;
+                out.push(format!("{}body", inner_pad));
+                self.emit_expr_into(body, indent + 2, out)?;
             }
         }
         Ok(())
@@ -265,10 +317,10 @@ impl CodeGen {
         match expr {
             Expr::Number(n) => n.to_string(),
             Expr::String(s) => format!("\"{}\"", s),
-            Expr::Variable(name) => name.clone(),
+            Expr::Variable(name) => format!("var {}", name),
             _ => self
                 .inline_expr(expr)
-                .unwrap_or_else(|| format!("{:?}", expr)),
+                .unwrap_or_else(|| format!("EXPR({:?})", expr)),
         }
     }
 

@@ -1,0 +1,36 @@
+@task main
+  mode distributed
+  body
+    val n = literal 10
+    call fibTasks args [var n]
+
+@task fibTasks
+  mode distributed
+  params
+    count: Int
+  body
+    @function fib
+      args [x]
+      body
+        if
+          binary "<="
+            var x
+            literal 1
+        then
+          return var x
+        else
+          return
+            binary "+"
+              call fib
+                args
+                  binary "-"
+                    var x
+                    literal 1
+              call fib
+                args
+                  binary "-"
+                    var x
+                    literal 2
+    for i in 1..count do
+      let result = call fib args [var i]
+      call print args [var result]

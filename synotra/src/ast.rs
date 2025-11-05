@@ -15,6 +15,10 @@ pub enum Expr {
         end: Box<Expr>,
         body: Vec<Expr>,
     },
+    While {
+        condition: Box<Expr>,
+        body: Vec<Expr>,
+    },
     Block(Vec<Expr>),
     Return(Box<Expr>),
     Call {

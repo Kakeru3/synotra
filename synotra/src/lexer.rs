@@ -156,6 +156,7 @@ impl<'a> Lexer<'a> {
                 "do" => Token::Do,
                 "let" => Token::Let,
                 "for" => Token::For,
+                "while" => Token::While,
                 other => Token::Identifier(other.to_string()),
             }
         } else if c == '.' {
@@ -236,11 +237,47 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     self.advance_char();
-                    Token::Char('.')
+                    Token::Dot
                 }
-                '+' | '-' | '*' | '/' | '<' | '>' | '[' | ']' | ':' => {
+                '+' => {
                     self.advance_char();
-                    Token::Char(c)
+                    Token::Plus
+                }
+                '-' => {
+                    self.advance_char();
+                    Token::Minus
+                }
+                '*' => {
+                    self.advance_char();
+                    Token::Star
+                }
+                '/' => {
+                    self.advance_char();
+                    Token::Slash
+                }
+                '%' => {
+                    self.advance_char();
+                    Token::Percent
+                }
+                '<' => {
+                    self.advance_char();
+                    if let Some(nextc) = self.peek_char() {
+                        if nextc == '=' {
+                            self.advance_char();
+                            return Token::LessEqual;
+                        }
+                    }
+                    Token::Less
+                }
+                '>' => {
+                    self.advance_char();
+                    if let Some(nextc) = self.peek_char() {
+                        if nextc == '=' {
+                            self.advance_char();
+                            return Token::GreaterEqual;
+                        }
+                    }
+                    Token::Greater
                 }
                 '=' => {
                     self.advance_char();
@@ -251,6 +288,44 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     Token::Char('=')
+                }
+                '!' => {
+                    self.advance_char();
+                    if let Some(nextc) = self.peek_char() {
+                        if nextc == '=' {
+                            self.advance_char();
+                            return Token::NotEqual;
+                        }
+                    }
+                    Token::Char('!')
+                }
+                '&' => {
+                    self.advance_char();
+                    if let Some(nextc) = self.peek_char() {
+                        if nextc == '&' {
+                            self.advance_char();
+                            return Token::And;
+                        }
+                    }
+                    Token::Char('&')
+                }
+                '|' => {
+                    self.advance_char();
+                    if let Some(nextc) = self.peek_char() {
+                        if nextc == '|' {
+                            self.advance_char();
+                            return Token::Or;
+                        }
+                    }
+                    Token::Char('|')
+                }
+                ':' => {
+                    self.advance_char();
+                    Token::Colon
+                }
+                '[' | ']' => {
+                    self.advance_char();
+                    Token::Char(c)
                 }
                 // それ以外の制御文字や未定義文字も1文字トークンとして返す
                 _ => {

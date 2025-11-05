@@ -123,7 +123,7 @@ impl Parser {
         if !matches!(self.current(), Token::Rparen) {
             loop {
                 let param_name = self.expect_identifier()?;
-                let param_type = if self.consume_char(':') {
+                let param_type = if self.consume_token(&Token::Colon) {
                     self.expect_identifier()? // simple identifiers as types
                 } else {
                     String::new()
@@ -180,7 +180,9 @@ impl Parser {
         match self.current() {
             Token::Let => self.parse_let(),
             Token::Val => self.parse_val(),
+            Token::Var => self.parse_var(),
             Token::For => self.parse_for(),
+            Token::While => self.parse_while(),
             Token::Fun => self.parse_fun_expr(),
             Token::Return => self.parse_return(),
             Token::If => self.parse_if_expression(),
@@ -204,6 +206,15 @@ impl Parser {
         Ok(Expr::Val(name, Box::new(expr)))
     }
 
+    fn parse_var(&mut self) -> Result<Expr> {
+        self.expect_token(&Token::Var)?;
+        let name = self.expect_identifier()?;
+        self.expect_char('=')?;
+        let expr = self.parse_expression()?;
+        // varはletと同じように扱う（再代入可能）
+        Ok(Expr::Let(name, Box::new(expr)))
+    }
+
     fn parse_return(&mut self) -> Result<Expr> {
         self.expect_token(&Token::Return)?;
         let expr = self.parse_expression()?;
@@ -218,7 +229,7 @@ impl Parser {
         if !matches!(self.current(), Token::Rparen) {
             loop {
                 let arg_name = self.expect_identifier()?;
-                if self.consume_char(':') {
+                if self.consume_token(&Token::Colon) {
                     let _ = self.expect_identifier()?;
                 }
                 args.push(arg_name);
@@ -228,7 +239,7 @@ impl Parser {
             }
         }
         self.expect_rparen()?;
-        if self.consume_char(':') {
+        if self.consume_token(&Token::Colon) {
             if matches!(self.current(), Token::Identifier(_)) {
                 self.advance();
             }
@@ -257,6 +268,21 @@ impl Parser {
             var,
             start: Box::new(start),
             end: Box::new(end),
+            body: stmts,
+        })
+    }
+
+    fn parse_while(&mut self) -> Result<Expr> {
+        self.expect_token(&Token::While)?;
+        let condition = self.parse_expression()?;
+        self.expect_token(&Token::Do)?;
+        let body_expr = self.parse_block()?;
+        let stmts = match body_expr {
+            Expr::Block(stmts) => stmts,
+            other => vec![other],
+        };
+        Ok(Expr::While {
+            condition: Box::new(condition),
             body: stmts,
         })
     }
@@ -307,14 +333,19 @@ impl Parser {
 
     fn binary_operator_info(&self) -> Option<(u8, char)> {
         match self.current() {
-            Token::Char('*') => Some((60, '*')),
-            Token::Char('/') => Some((60, '/')),
-            Token::Char('%') => Some((60, '%')),
-            Token::Char('+') => Some((50, '+')),
-            Token::Char('-') => Some((50, '-')),
-            Token::Char('<') => Some((40, '<')),
-            Token::Char('>') => Some((40, '>')),
+            Token::Star => Some((60, '*')),
+            Token::Slash => Some((60, '/')),
+            Token::Percent => Some((60, '%')),
+            Token::Plus => Some((50, '+')),
+            Token::Minus => Some((50, '-')),
+            Token::Less => Some((40, '<')),
+            Token::Greater => Some((40, '>')),
+            Token::LessEqual => Some((40, 'l')),     // '<='を表す文字
+            Token::GreaterEqual => Some((40, 'g')),  // '>='を表す文字
             Token::EqualEqual => Some((30, '=')),
+            Token::NotEqual => Some((30, 'n')),      // '!='を表す文字
+            Token::And => Some((20, '&')),           // '&&'
+            Token::Or => Some((10, '|')),            // '||'
             _ => None,
         }
     }
