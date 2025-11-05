@@ -7,9 +7,71 @@ use compiler::{lexer::Lexer, parser::Parser};
 use interpreter::Interpreter;
 use std::env;
 use std::fs;
+use std::time::Instant;
+use rayon::ThreadPoolBuilder;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    // --comp <file> [runs]: 比較実行モード（シングルスレッド vs 並列）
+    if args.len() > 1 && args[1] == "--comp" {
+        if args.len() < 3 {
+            eprintln!("Usage: syvm --comp <file.syi> [runs]");
+            return;
+        }
+        let file_path = &args[2];
+        let runs: usize = if args.len() > 3 {
+            args[3].parse().unwrap_or(3)
+        } else {
+            3
+        };
+
+        // read source and parse once
+        let source = fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read {}", file_path));
+        let mut lexer = compiler::lexer::Lexer::new(&source);
+        let tokens = lexer.tokenize().expect("Failed to tokenize");
+        let mut parser = compiler::parser::Parser::new(tokens);
+        let program = parser.parse().expect("Failed to parse");
+
+        let interpreter = interpreter::Interpreter::new(program.clone());
+
+        println!("Comparing single-threaded (1) vs parallel (default) for {} runs on {}", runs, file_path);
+
+        // single-threaded runs (rayon pool with 1 thread)
+        let mut single_times = Vec::new();
+        for i in 0..runs {
+            let pool = ThreadPoolBuilder::new().num_threads(1).build().expect("Failed to build rayon pool");
+            let start = Instant::now();
+            pool.install(|| {
+                interpreter.run().expect("Program failed during single-threaded run");
+            });
+            let dur = start.elapsed();
+            println!("single run {}: {:?}", i + 1, dur);
+            single_times.push(dur.as_secs_f64());
+        }
+
+        // parallel runs (default pool)
+        let mut parallel_times = Vec::new();
+        for i in 0..runs {
+            let pool = ThreadPoolBuilder::new().build().expect("Failed to build rayon pool");
+            let start = Instant::now();
+            pool.install(|| {
+                interpreter.run().expect("Program failed during parallel run");
+            });
+            let dur = start.elapsed();
+            println!("parallel run {}: {:?}", i + 1, dur);
+            parallel_times.push(dur.as_secs_f64());
+        }
+
+        let avg = |v: &Vec<f64>| v.iter().sum::<f64>() / (v.len() as f64);
+        let single_avg = avg(&single_times);
+        let parallel_avg = avg(&parallel_times);
+        println!("\naverage single-threaded: {:.6}s", single_avg);
+        println!("average parallel: {:.6}s", parallel_avg);
+        if parallel_avg > 0.0 {
+            println!("speedup (single / parallel): {:.3}x", single_avg / parallel_avg);
+        }
+        return;
+    }
 
     // ファイル指定がある場合はそのファイルを実行
     if args.len() > 1 {
