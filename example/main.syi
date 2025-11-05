@@ -1,0 +1,4 @@
+@task main
+  mode distributed
+  body
+    call print args [literal "Hello World!"]

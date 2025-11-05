@@ -316,7 +316,7 @@ impl CodeGen {
     fn render_call_arg(&self, expr: &Expr) -> String {
         match expr {
             Expr::Number(n) => n.to_string(),
-            Expr::String(s) => format!("\"{}\"", s),
+            Expr::String(s) => format!("literal \"{}\"", s),
             Expr::Variable(name) => format!("var {}", name),
             _ => self
                 .inline_expr(expr)
