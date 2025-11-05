@@ -571,6 +571,12 @@ impl Parser {
                 let name = self.expect_identifier()?;
                 Ok(Expression::Var(name))
             }
+            Token::String(s) => {
+                let str_val = s.clone();
+                self.advance();
+                Ok(Expression::Literal(Literal::String(str_val)))
+            }
+
             Token::Number(n) => {
                 let num = *n;
                 self.advance();
