@@ -25,7 +25,7 @@ fn main() {
             3
         };
 
-        // read source and parse once
+    // ソースを読み込み、1回だけ解析して AST を作成します
         let source = fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read {}", file_path));
         let mut lexer = compiler::lexer::Lexer::new(&source);
         let tokens = lexer.tokenize().expect("Failed to tokenize");
@@ -36,7 +36,7 @@ fn main() {
 
         println!("Comparing single-threaded (1) vs parallel (default) for {} runs on {}", runs, file_path);
 
-        // single-threaded runs (rayon pool with 1 thread)
+    // シングルスレッド実行（rayon のプールを 1 スレッドにして実行）
         let mut single_times = Vec::new();
         for i in 0..runs {
             let pool = ThreadPoolBuilder::new().num_threads(1).build().expect("Failed to build rayon pool");
@@ -49,7 +49,7 @@ fn main() {
             single_times.push(dur.as_secs_f64());
         }
 
-        // parallel runs (default pool)
+    // 並列実行（デフォルトの rayon プール）
         let mut parallel_times = Vec::new();
         for i in 0..runs {
             let pool = ThreadPoolBuilder::new().build().expect("Failed to build rayon pool");

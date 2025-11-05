@@ -42,9 +42,10 @@ impl Interpreter {
         builtin_functions.insert(
             "print".to_string(),
             Arc::new(|args: Vec<Value>| {
-                // route prints to stderr so they are visible together with
-                // DEBUG logs (which use stderr). This avoids missing output
-                // when the consumer only watches stderr.
+                // print を stderr に出力することで、
+                // debug ログ（stderr を使う）と同じ流れで出力されます。
+                // これにより、利用者が stderr のみを監視している場合でも
+                // 出力が見落とされにくくなります。
                 for arg in &args {
                     eprintln!("{}", arg);
                 }
@@ -108,13 +109,13 @@ impl Interpreter {
             if let Statement::Call { name, args } = &statements[i] {
                 if let Some(task) = self.program.find_task(name) {
                     if task.mode == TaskMode::Distributed {
-                        // collect consecutive distributed task calls
+                        // 連続する分散タスク呼び出しを収集してバッチ化します
                         let mut batch: Vec<(Task, Vec<Value>)> = Vec::new();
                         while i < statements.len() {
                             if let Statement::Call { name: nm, args: as_ex } = &statements[i] {
                                 if let Some(t) = self.program.find_task(nm) {
                                     if t.mode == TaskMode::Distributed {
-                                        // evaluate args now (in parent env)
+                                        // 引数は親環境でここで評価しておきます
                                         let mut arg_vals: Vec<Value> = Vec::new();
                                         for ex in as_ex {
                                             match self.eval_expression(ex, env) {
@@ -142,7 +143,7 @@ impl Interpreter {
                             .collect();
 
                         last_value = results.last().cloned().unwrap_or(Value::Unit);
-                        continue; // i is already advanced by the inner loop
+                        continue; // 内部ループで i を進め済みなのでここでは増やさない
                     }
                 }
             }
@@ -179,7 +180,7 @@ impl Interpreter {
             }
 
             Statement::FunctionDef(func) => {
-                // function definitions are stored in the environment; no debug print here
+                // 関数定義は環境に登録します。ここではデバッグ用の出力は行いません。
                 env.set_function(func.name.clone(), func.clone());
                 Ok(Value::Unit)
             }
@@ -239,7 +240,7 @@ impl Interpreter {
             }
 
             Statement::While { condition, body } => {
-                // Evaluate condition each iteration and run body while truthy
+                // 各イテレーションで条件を評価し、真であれば本体を実行し続けます
                 let mut last_val = Value::Unit;
                 loop {
                     let cond_val = self.eval_expression(condition, env)?;
@@ -309,7 +310,7 @@ impl Interpreter {
     /// 二項演算を評価
     fn eval_binary_op(&self, op: &str, left: Value, right: Value) -> Result<Value, ControlFlow> {
         match (op, left, right) {
-            // equality operators: support both "==" and legacy "="
+            // 等価演算子: 新しい "==" と旧来の "=" の両方をサポートします
             ("==", Value::Int(l), Value::Int(r)) | ("=", Value::Int(l), Value::Int(r)) => {
                 Ok(Value::Bool(l == r))
             }
@@ -318,13 +319,13 @@ impl Interpreter {
             ("==", Value::Bool(l), Value::Bool(r)) | ("=", Value::Bool(l), Value::Bool(r)) => {
                 Ok(Value::Bool(l == r))
             }
-            // not-equal
+            // 非等価
             ("!=", Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l != r)),
             ("!=", Value::String(l), Value::String(r)) => Ok(Value::Bool(l != r)),
             ("!=", Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l != r)),
             ("%", Value::Int(l), Value::Int(r)) => Ok(Value::Int(l % r)),
             ("+", Value::Int(l), Value::Int(r)) => Ok(Value::Int(l + r)),
-            // string concatenation
+            // 文字列連結
             ("+", Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
             ("+", Value::String(l), Value::Int(r)) => Ok(Value::String(format!("{}{}", l, r))),
             ("+", Value::Int(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
@@ -335,7 +336,7 @@ impl Interpreter {
             (">", Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l > r)),
             ("<=", Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l <= r)),
             (">=", Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l >= r)),
-            // logical operators
+            // 論理演算子
             ("&&", Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l && r)),
             ("||", Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l || r)),
             _ => Err(ControlFlow::Error(format!("Unsupported operation: {}", op))),

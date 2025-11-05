@@ -35,18 +35,19 @@ impl Parser {
             if self.check(&Token::Task) {
                 program.add_task(self.parse_task()?);
             } else if !program.tasks.is_empty() {
-                // If we see stray branch markers (Then/Else) at top-level, skip them
-                // instead of failing immediately — these can appear when previous
-                // block parsing left a marker due to indentation balancing issues.
+                // トップレベルに不意の分岐マーカー（Then/Else）が残っている場合、
+                // すぐにエラーとするのではなくスキップして回復を試みます。
+                // これは前のブロック解析でインデントのバランスが崩れ、マーカーが
+                // 残ってしまった場合に発生します。
                 if self.check(&Token::Then) || self.check(&Token::Else) {
                     self.advance();
                     continue;
                 }
 
-                // Conservative recovery: first normalize by skipping any leading
-                // newlines/indents (these can appear after a stray Then/Else was
-                // consumed). Then, if we're still indented and the next token
-                // looks like a statement, parse and append to the last task.
+                // 保守的な回復策として、まず先頭の改行やインデントを正規化します。
+                // （これらは Then/Else を消費した後に残ることがあります。）その後、
+                // まだインデントが残っていて次のトークンが文に見える場合はそれを解析
+                // して最後のタスクに追加します。
                 self.skip_newlines_and_indents();
 
                 if self.indent_depth > 0
@@ -145,8 +146,8 @@ impl Parser {
         if self.check(&Token::Indent) {
             self.advance();
         }
-        // record entry depth after consuming the Indent so that
-        // consume_dedents_to restores to the correct level
+    // Indent を消費した後の深さを記録します。
+    // これにより consume_dedents_to が正しいレベルに復元できます。
         let entry_depth = self.indent_depth;
 
         let body = self.parse_statements(false)?;
@@ -276,8 +277,8 @@ impl Parser {
         if self.check(&Token::Indent) {
             self.advance();
         }
-        // record entry depth after consuming the Indent so that
-        // we can restore correctly later
+    // Indent を消費した後の深さを記録します。
+    // 後で正しく復元できるようにするためです。
         let entry_depth = self.indent_depth;
 
         let body = self.parse_statements(false)?;
@@ -305,18 +306,17 @@ impl Parser {
 
         // ...
 
-        // remember the indentation level at the start of this if
-        let overall_entry = self.indent_depth;
+    // この if ブロック開始時のインデントレベルを記録します
+    let overall_entry = self.indent_depth;
 
-        // parse the condition (may be multi-line)
-        let condition = self.parse_expression()?;
-        self.skip_newlines();
+    // 条件式を解析します（複数行になる可能性があります）
+    let condition = self.parse_expression()?;
+    self.skip_newlines();
 
-        // consume any Dedent tokens produced by condition parsing up to the
-        // level where the if started so that the following `Then` is found
-        // at the correct level.
-        self.consume_dedents_to(overall_entry);
-        self.skip_newlines();
+    // 条件式の解析で発生した Dedent トークンを if の開始レベルまで消費します。
+    // これにより続く `Then` が正しいレベルで見つかります。
+    self.consume_dedents_to(overall_entry);
+    self.skip_newlines();
 
         // expect Then
         self.expect(&Token::Then)?;

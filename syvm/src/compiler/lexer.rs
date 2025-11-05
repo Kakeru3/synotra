@@ -216,7 +216,7 @@ impl Lexer {
     }
 
     fn read_string(&mut self) -> Result<Token, String> {
-        self.advance(); // skip opening "
+    self.advance(); // 開始の '"' をスキップ
         let mut result = String::new();
 
         while !self.is_at_end() && self.current_char() != '"' {
@@ -228,7 +228,7 @@ impl Lexer {
             return Err("Unterminated string".to_string());
         }
 
-        self.advance(); // skip closing "
+    self.advance(); // 終了の '"' をスキップ
         Ok(Token::String(result))
     }
 }
