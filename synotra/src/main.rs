@@ -18,7 +18,7 @@ fn main() {
     let mut args = env::args().skip(1);
     if let Some(path) = args.next() {
         let p = Path::new(&path);
-        // special debug flag: --lex <file>
+    // デバッグ用の特別オプション: `--lex <file>` を指定すると字句解析結果を表示します
         if path == "--lex" {
             if let Some(fpath) = args.next() {
                 let content = std::fs::read_to_string(&fpath).unwrap_or_default();

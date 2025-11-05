@@ -77,10 +77,10 @@ impl Parser {
         if !matches!(self.current(), Token::Rparen) {
             loop {
                 let arg_name = self.expect_identifier()?;
-                if self.consume_char(':') {
-                    // drop the type annotation for now, only simple identifiers supported
-                    let _ = self.expect_identifier()?;
-                }
+                    if self.consume_char(':') {
+                        // 型注釈はとりあえず無視します（現状は単純な識別子のみサポート）
+                        let _ = self.expect_identifier()?; // 型は単純識別子として扱います
+                    }
                 args.push(arg_name);
                 if !self.consume_token(&Token::Comma) {
                     break;
@@ -124,7 +124,7 @@ impl Parser {
             loop {
                 let param_name = self.expect_identifier()?;
                 let param_type = if self.consume_token(&Token::Colon) {
-                    self.expect_identifier()? // simple identifiers as types
+                    self.expect_identifier()? // 型注釈は単純な識別子として扱います
                 } else {
                     String::new()
                 };
@@ -420,7 +420,7 @@ impl Parser {
             return Err(anyhow!("expected identifier"));
         };
         self.advance();
-        // Assignment to an existing variable: `name = expr`
+        // 既存変数への代入: `name = expr`
         if self.consume_char('=') {
             let expr = self.parse_expression()?;
             return Ok(Expr::Let(name, Box::new(expr)));
@@ -571,6 +571,6 @@ mod tests {
         assert!(tokens.len() > 2);
         assert!(matches!(tokens.last(), Some(Token::Eof)));
     }
-} // Parser implemented with nom combinators.
+}
 
-// It parses the source text directly into the AST defined in `ast.rs`.
+// このパーサはソーステキストを直接 `ast.rs` に定義された AST に変換します。

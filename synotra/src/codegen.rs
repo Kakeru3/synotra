@@ -8,9 +8,9 @@ use std::path::Path;
 
 #[derive(Default)]
 pub struct CodeGen {
-    // collected module-level items as textual snippets
+    // モジュールレベルの要素をテキストスニペットとして収集します
     items: Vec<String>,
-    // prototypes recorded (name -> args)
+    // 登録済みプロトタイプ（名前 -> 引数リスト）
     protos: HashMap<String, Vec<String>>,
 }
 
@@ -26,19 +26,19 @@ impl CodeGen {
         let _ = name;
     }
 
-    /// Return the textual module representation (concatenation of items)
+    /// モジュールのテキスト表現を返します（収集したアイテムを連結したもの）
     pub fn module(&self) -> String {
         self.items.join("\n")
     }
 
     pub fn codegen_proto(&mut self, proto: &Prototype) -> Result<()> {
-        // record prototype
+        // プロトタイプを記録します
         self.protos.insert(proto.name.clone(), proto.args.clone());
         Ok(())
     }
 
     pub fn codegen_function(&mut self, function: &Function) -> Result<String> {
-        // emit a function as an IR block. For compatibility with .syi we emit a @function
+    // 関数を IR ブロックとして出力します。.syi との互換性のために @function 形式で出します
         let mut lines: Vec<String> = Vec::new();
         lines.push(format!("@function {}", function.proto.name));
         if !function.proto.args.is_empty() {
@@ -53,7 +53,7 @@ impl CodeGen {
     }
 
     pub fn codegen_anonymous(&mut self, func: &Function) -> Result<(String, String)> {
-        // similar to previous behavior: ensure unique name
+    // 以前の挙動に倣い、一意の名前となるよう調整します
         let mut name = func.proto.name.clone();
         if self.protos.contains_key(&name)
             || self
@@ -84,7 +84,7 @@ impl CodeGen {
             body: func.body.clone(),
         };
         let _ = self.codegen_function(&func2)?;
-        // return the name and module text
+        // 名前とモジュールのテキストを返します
         Ok((name, self.module()))
     }
 
@@ -107,7 +107,7 @@ impl CodeGen {
             }
         }
         lines.push("  body".to_string());
-        // render body using existing emit_expr_into for statements inside the block
+    // ブロック内の文は既存の emit_expr_into を使って出力します
         match &task.body {
             Expr::Block(stmts) => {
                 for stmt in stmts.iter() {
@@ -123,7 +123,7 @@ impl CodeGen {
         Ok(ar_text)
     }
 
-    /// Convenience helper used by the REPL to write a single task to a file.
+    /// REPL から単一タスクをファイルに書き出すための便利ヘルパ
     pub fn codegen_task_to_path(&mut self, task: &Task, out_path: &Path) -> Result<String> {
         let ar_text = self.render_task(task)?;
         let mut f = File::create(out_path)?;
@@ -141,7 +141,7 @@ impl CodeGen {
                 out.push(format!("{}var {}", pad, name));
             }
             Expr::Binary(op, lhs, rhs) => {
-                // 演算子文字をsyi形式の文字列に変換
+                // 演算子文字を syi 形式の文字列に変換
                 let op_str = match op {
                     '*' => "*",
                     '/' => "/",
@@ -150,13 +150,13 @@ impl CodeGen {
                     '-' => "-",
                     '<' => "<",
                     '>' => ">",
-                    'l' => "<=",  // LessEqual
-                    'g' => ">=",  // GreaterEqual
-                    '=' => "==",  // EqualEqual
-                    'n' => "!=",  // NotEqual
-                    '&' => "&&",  // And
-                    '|' => "||",  // Or
-                    _ => "?",     // Unknown operator
+                    'l' => "<=",  // <= (LessEqual)
+                    'g' => ">=",  // >= (GreaterEqual)
+                    '=' => "==",  // == (EqualEqual)
+                    'n' => "!=",  // != (NotEqual)
+                    '&' => "&&",  // && (And)
+                    '|' => "||",  // || (Or)
+                    _ => "?",     // 未知の演算子
                 };
                 out.push(format!("{}binary \"{}\"", pad, op_str));
                 self.emit_expr_into(lhs, indent + 1, out)?;
@@ -212,10 +212,10 @@ impl CodeGen {
                 end,
                 body,
             } => {
-                // emit for header
-                // start and end are expressions; try to pretty print simple forms
+                // for ヘッダを出力します
+                // start と end は式なので、単純な場合は見やすくインライン表示を試みます
                 let mut hdr = format!("{}for {} in ", pad, var);
-                // inline start..end if both are simple
+                // start と end が両方単純な式なら、見やすさのために inline で start..end として出力します
                 match (&**start, &**end) {
                     (Expr::Number(n1), Expr::Variable(v2)) => {
                         hdr.push_str(&format!("{}..{}", n1, v2));
@@ -232,15 +232,15 @@ impl CodeGen {
                 }
                 hdr.push_str(" do");
                 out.push(hdr);
-                // emit body statements
+                // 本体の文を出力します
                 for stmt in body.iter() {
                     self.emit_expr_into(stmt, indent + 1, out)?;
                 }
             }
             Expr::While { condition, body } => {
-                // emit while header
+                // while ヘッダを出力します
                 let mut hdr = format!("{}while ", pad);
-                // try to inline the condition if simple
+                // 条件式が単純ならインライン化して見やすく出力します
                 if let Some(inline_cond) = self.inline_expr(condition) {
                     hdr.push_str(&inline_cond);
                 } else {
@@ -248,11 +248,11 @@ impl CodeGen {
                 }
                 hdr.push_str(" do");
                 out.push(hdr);
-                // emit condition if not inlined
+                // インライン化されなかった場合は条件式を別行で出力します
                 if self.inline_expr(condition).is_none() {
                     self.emit_expr_into(condition, indent + 1, out)?;
                 }
-                // emit body statements
+                // 本体の文を出力します
                 for stmt in body.iter() {
                     self.emit_expr_into(stmt, indent + 1, out)?;
                 }
@@ -271,7 +271,7 @@ impl CodeGen {
                 }
             }
             Expr::Function { proto, body } => {
-                // reuse the same format as codegen_function
+                // codegen_function と同じフォーマットを再利用します
                 out.push(format!("{}@function {}", pad, proto.name));
                 let inner_pad = "  ".repeat(indent + 1);
                 if !proto.args.is_empty() {
@@ -324,7 +324,7 @@ impl CodeGen {
         }
     }
 
-    /// write accumulated module text to a file path
+    /// 収集したモジュールテキストをファイルに書き出します
     #[allow(dead_code)]
     pub fn write_module_to(&self, path: &Path) -> Result<()> {
         let mut f = File::create(path)?;
@@ -332,10 +332,10 @@ impl CodeGen {
         Ok(())
     }
 
-    /// run_function_by_name is no longer supported in IR-only mode
+    /// IR-only モードでは run_function_by_name はサポートされていません
     pub fn run_function_by_name(&mut self, _name: &str) -> Result<f64> {
         Err(anyhow!(
-            "run_function_by_name is not supported in IR backend"
+            "run_function_by_name は IR バックエンドではサポートされていません"
         ))
     }
 }

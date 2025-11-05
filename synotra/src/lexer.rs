@@ -57,7 +57,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_string(&mut self) -> String {
-        // assume current char is '"' and advance past it
+    // 現在の文字は '"' と仮定して、その文字を読み飛ばします
         let _ = self.advance_char();
         let mut out = String::new();
         while let Some(ch) = self.peek_char() {
@@ -65,9 +65,9 @@ impl<'a> Lexer<'a> {
                 self.advance_char();
                 break;
             }
-            // support simple escape for \"
+            // "\"" のような簡単なエスケープをサポートします
             if ch == '\\' {
-                // consume backslash
+                // バックスラッシュを消費します
                 self.advance_char();
                 if let Some(next) = self.advance_char() {
                     out.push(next);
@@ -89,8 +89,8 @@ impl<'a> Lexer<'a> {
             if c.is_ascii_digit() {
                 end += c.len_utf8();
             } else if c == '.' && !seen_dot {
-                // If the dot is followed by another dot, it's the range operator '..' and
-                // should not be consumed as a decimal point.
+                // ドットの直後に別のドットがある場合、これは範囲演算子 ".." です。
+                // そのため小数点の一部として消費してはいけません。
                 let mut it = s[end..].chars();
                 it.next();
                 if let Some(nextch) = it.next() {
@@ -108,7 +108,7 @@ impl<'a> Lexer<'a> {
             return Err(());
         }
         let num_str = &s[self.pos..end];
-        // Try to parse without committing to advancing `self.pos` until successful.
+    // 解析が成功するまで `self.pos` を進めることを確定しないように試行的に解析します。
         match num_str.parse() {
             Ok(n) => {
                 self.pos = end;
@@ -160,18 +160,18 @@ impl<'a> Lexer<'a> {
                 other => Token::Identifier(other.to_string()),
             }
         } else if c == '.' {
-            // If this is the range operator '..', handle it explicitly before number parsing.
+            // ここが範囲演算子 ".." であれば、数値解析より先に明示的に処理します。
             let mut it = self.input[self.pos..].chars();
             it.next();
             if let Some(nextch) = it.next() {
                 if nextch == '.' {
-                    // consume two dots
+                    // 2つのドットを消費します
                     self.advance_char();
                     self.advance_char();
                     return Token::Range;
                 }
             }
-            // otherwise fall back to number parsing (e.g. .5)
+            // それ以外は数値解析にフォールバックします（例: .5）
             match self.lex_number() {
                 Ok(n) => Token::Number(n),
                 // 数字でない場合はドットトークンとして扱う
@@ -217,18 +217,18 @@ impl<'a> Lexer<'a> {
                     Token::Semicolon
                 }
                 '"' => {
-                    // string literal
+                    // 文字列リテラル
                     let s = self.lex_string();
                     Token::Str(s)
                 }
                 '.' => {
-                    // range operator '..'
-                    // peek second char
+                    // 範囲演算子 '..'
+                    // 2文字目を先読みして判定します
                     let mut it = self.input[self.pos..].chars();
                     it.next();
                     if let Some(nextch) = it.next() {
                         if nextch == '.' {
-                            // consume two dots
+                            // 2つのドットを消費します
                             self.advance_char();
                             self.advance_char();
                             return Token::Range;
@@ -335,6 +335,7 @@ impl<'a> Lexer<'a> {
     }
 
     // 先読み（位置を変えずに次のトークンを取得）
+    #[allow(dead_code)]
     pub fn peek(&self) -> Token {
         let mut clone = self.clone();
         clone.next()

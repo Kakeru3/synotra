@@ -4,7 +4,7 @@
 
 use crate::codegen::CodeGen;
 use crate::parser::Parser;
-// emitter module kept for backward compatibility; run-time now prefers Parser->CodeGen flow
+// emitter モジュールは後方互換のため残していますが、ランタイムは現在 Parser -> CodeGen の流れを推奨します
 use crate::ast::TopLevel;
 use anyhow::Result;
 use rustyline::Editor;
@@ -15,7 +15,7 @@ use std::path::Path;
 
 // REPLモード
 pub fn run_repl() -> Result<()> {
-    // create the IR-backed CodeGen. It emits our textual .syi-like IR.
+    // IR ベースの CodeGen を生成します。これは .syi ライクなテキスト IR を出力します。
     let mut codegen = CodeGen::new("synotra");
 
     let mut rl: Editor<(), DefaultHistory> = Editor::new()?;
@@ -32,12 +32,12 @@ pub fn run_repl() -> Result<()> {
                     break;
                 }
                 // 入力行を処理する（ファイル処理と共通）
-                // If the user starts a `task` block, collect lines until the matching `}`.
+                // ユーザが `task` ブロックを書き始めた場合、対応する `}` が来るまで行を収集します。
                 if line.starts_with("task") {
-                    // Start building the full block; include the first line as-is
+                    // ブロック全体を組み立てます（最初の行はそのまま含めます）
                     let mut block = String::new();
                     block.push_str(line);
-                    // Count braces to detect block end
+                    // 波カッコの数を数えてブロックの終端を検出します
                     let mut brace_count: i32 = 0;
                     for ch in line.chars() {
                         if ch == '{' {
@@ -47,7 +47,7 @@ pub fn run_repl() -> Result<()> {
                         }
                     }
 
-                    // If the opening brace wasn't on the first line, keep reading until we see it
+                    // もし開き波カッコが最初の行になければ、見つかるまで読み続けます
                     while brace_count > 0 {
                         match rl.readline(".. ") {
                             Ok(next) => {
@@ -65,7 +65,7 @@ pub fn run_repl() -> Result<()> {
                             Err(_) => break,
                         }
                     }
-                    // Parse the pasted task and emit .syi using CodeGen
+                    // 収集したタスクをパースして CodeGen を使って .syi を出力します
                     let mut parser = Parser::new(&block);
                     match parser.parse_source() {
                         Ok(items) => {
@@ -132,7 +132,7 @@ fn process_line(line: &str, codegen: &mut CodeGen) {
         }
     } else {
         let mut p = Parser::new(line);
-        // First, check if input is a 'task' block; if so, parse and use CodeGen
+    // まず、入力が 'task' ブロックかを確認し、そうであればパースして CodeGen を使います
         if line.starts_with("task") {
             let mut parser = Parser::new(line);
             match parser.parse_source() {
