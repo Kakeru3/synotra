@@ -1,47 +1,48 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // キーワード
-    Task,           // @task
-    Function,       // @function
-    Mode,           // mode
-    Distributed,    // distributed
-    Params,         // params
-    Body,           // body
-    Args,           // args
-    Val,            // val
-    Let,            // let
-    If,             // if
-    Then,           // then
-    Else,           // else
-    For,            // for
-    In,             // in
-    Do,             // do
-    Return,         // return
-    Call,           // call
-    Var,            // var
-    Literal,        // literal
-    Binary,         // binary
-    
+    Task,        // @task
+    Function,    // @function
+    Mode,        // mode
+    Distributed, // distributed
+    Params,      // params
+    Body,        // body
+    Args,        // args
+    Val,         // val
+    Let,         // let
+    If,          // if
+    Then,        // then
+    Else,        // else
+    While,       // while
+    For,         // for
+    In,          // in
+    Do,          // do
+    Return,      // return
+    Call,        // call
+    Var,         // var
+    Literal,     // literal
+    Binary,      // binary
+
     // リテラル
     Identifier(String),
     Number(i64),
     String(String),
-    
+
     // 型
-    IntType,        // Int
-    StringType,     // String
-    BoolType,       // Bool
-    
+    IntType,    // Int
+    StringType, // String
+    BoolType,   // Bool
+
     // 演算子（文字列として扱われる場合もある）
     Operator(String), // "=", "%", "+", "-", etc.
-    
+
     // 区切り記号
-    LBracket,       // [
-    RBracket,       // ]
-    Colon,          // :
-    Comma,          // ,
-    Range,          // ..
-    
+    LBracket, // [
+    RBracket, // ]
+    Colon,    // :
+    Comma,    // ,
+    Range,    // ..
+
     // その他
     Newline,
     Indent,
@@ -64,6 +65,7 @@ impl Token {
             "if" => Some(Token::If),
             "then" => Some(Token::Then),
             "else" => Some(Token::Else),
+            "while" => Some(Token::While),
             "for" => Some(Token::For),
             "in" => Some(Token::In),
             "do" => Some(Token::Do),

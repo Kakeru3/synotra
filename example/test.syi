@@ -1,0 +1,146 @@
+@task main
+  mode distributed
+  body
+    val n = literal 10
+    val m = literal 15
+    call fibTasks args [var n]
+    call computeTasks args [var m]
+    call fizzbuzz
+      args
+        binary "*"
+          var n
+          literal 10
+
+@task fibTasks
+  mode distributed
+  params
+    count: Int
+  body
+    @function fib
+      args [x]
+      body
+        if
+          binary "<="
+            var x
+            literal 1
+        then
+          return var x
+        else
+          return
+            binary "+"
+              call fib
+                args
+                  binary "-"
+                    var x
+                    literal 1
+              call fib
+                args
+                  binary "-"
+                    var x
+                    literal 2
+    for i in 1..count do
+      val result = call fib args [var i]
+      call print
+        args
+          binary "+"
+            binary "+"
+              binary "+"
+                literal "Fib("
+                call toString args [var i]
+              literal ") = "
+            call toString args [var result]
+
+@task computeTasks
+  mode distributed
+  params
+    count: Int
+  body
+    @function heavyCalc
+      args [x]
+      body
+        let sum = literal 0
+        let i = literal 0
+        while condition do
+          binary "<"
+            var i
+            var x
+          if
+            binary "||"
+              binary "=="
+                binary "%"
+                  var i
+                  literal 2
+                literal 0
+              binary "=="
+                binary "%"
+                  var i
+                  literal 3
+                literal 0
+          then
+            let sum =
+              binary "+"
+                var sum
+                binary "*"
+                  var i
+                  literal 2
+          else
+            let sum =
+              binary "+"
+                var sum
+                var i
+          let i =
+            binary "+"
+              var i
+              literal 1
+        return var sum
+    for i in 1..count do
+      val value = call heavyCalc args [var i]
+      call print
+        args
+          binary "+"
+            binary "+"
+              binary "+"
+                literal "Calc("
+                call toString args [var i]
+              literal ") = "
+            call toString args [var value]
+
+@task fizzbuzz
+  mode distributed
+  params
+    n: Int
+  body
+    @function fizzbuzzValue
+      args [i]
+      body
+        if
+          binary "=="
+            binary "%"
+              var i
+              literal 15
+            literal 0
+        then
+          return literal "FizzBuzz"
+        else
+          if
+            binary "=="
+              binary "%"
+                var i
+                literal 3
+              literal 0
+          then
+            return literal "Fizz"
+          else
+            if
+              binary "=="
+                binary "%"
+                  var i
+                  literal 5
+                literal 0
+            then
+              return literal "Buzz"
+            else
+              return call toString args [var i]
+    for i in 1..n do
+      val result = call fizzbuzzValue args [var i]
+      call print args [var result]

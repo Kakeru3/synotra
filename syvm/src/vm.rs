@@ -1,14 +1,14 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 
 /// VM 上のタスク構造
-/// 
+///
 /// ジェネリック型 T を使用して、任意の戻り値型を持つタスクを表現できます。
 /// タスクは依存関係を持ち、依存するタスクが完了してから実行されます。
 #[derive(Clone)]
-pub struct Task<T> 
+pub struct Task<T>
 where
     T: Send + Sync + Clone,
 {
@@ -40,7 +40,7 @@ where
 }
 
 /// タスクを並列実行するための仮想マシン
-/// 
+///
 /// タスク間の依存関係を解決し、可能な限り並列で実行します。
 pub struct VM<T>
 where
@@ -67,12 +67,12 @@ where
     }
 
     /// タスクを並列実行
-    /// 
+    ///
     /// 依存関係を解決しながら、実行可能なタスクを並列で実行します。
     /// 結果は HashMap<タスクID, 結果> の形式で返されます。
     pub fn run_parallel(&self) -> HashMap<usize, T> {
         let results: Arc<Mutex<HashMap<usize, T>>> = Arc::new(Mutex::new(HashMap::new()));
-        let mut pending: HashMap<usize, Task<T>> = 
+        let mut pending: HashMap<usize, Task<T>> =
             self.tasks.iter().map(|t| (t.id, t.clone())).collect();
 
         let (tx, rx) = channel::<usize>();
@@ -81,7 +81,11 @@ where
             // 実行可能なタスクを探す（依存関係がすべて満たされているタスク）
             let ready: Vec<Task<T>> = pending
                 .values()
-                .filter(|t| t.depends_on.iter().all(|d| results.lock().unwrap().contains_key(d)))
+                .filter(|t| {
+                    t.depends_on
+                        .iter()
+                        .all(|d| results.lock().unwrap().contains_key(d))
+                })
                 .cloned()
                 .collect();
 
@@ -112,12 +116,12 @@ where
     }
 
     /// タスクをシングルスレッドで実行
-    /// 
+    ///
     /// 依存関係を解決しながら、順次実行します。
     /// デバッグやベンチマーク用途で使用できます。
     pub fn run_single(&self) -> HashMap<usize, T> {
         let mut results = HashMap::new();
-        let mut pending: HashMap<usize, Task<T>> = 
+        let mut pending: HashMap<usize, Task<T>> =
             self.tasks.iter().map(|t| (t.id, t.clone())).collect();
 
         while !pending.is_empty() {

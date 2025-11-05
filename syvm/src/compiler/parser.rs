@@ -1,5 +1,5 @@
-use crate::compiler::token::Token;
 use crate::compiler::ast::*;
+use crate::compiler::token::Token;
 
 /// 構文解析器
 /// トークン列からASTを生成
@@ -35,15 +35,39 @@ impl Parser {
             if self.check(&Token::Task) {
                 program.add_task(self.parse_task()?);
             } else if !program.tasks.is_empty() {
-                // トップレベルで @task が来ない場合、現在のトークンが
-                // 直前にパースしたタスクのボディに属する文である可能性がある。
-                // その場合は最後に追加したタスクの body に追加で文をパースして
-                // 結合する。（過渡的なパースずれを回復するための安全策）
-                eprintln!("DEBUG: Top-level encountered non-Task token; appending statements to last task: {:?}", self.current());
-                let stmts = self.parse_statements()?;
-                if !stmts.is_empty() {
-                    if let Some(last) = program.tasks.last_mut() {
-                        last.body.extend(stmts);
+                // If we see stray branch markers (Then/Else) at top-level, skip them
+                // instead of failing immediately — these can appear when previous
+                // block parsing left a marker due to indentation balancing issues.
+                if self.check(&Token::Then) || self.check(&Token::Else) {
+                    self.advance();
+                    continue;
+                }
+
+                // Conservative recovery: first normalize by skipping any leading
+                // newlines/indents (these can appear after a stray Then/Else was
+                // consumed). Then, if we're still indented and the next token
+                // looks like a statement, parse and append to the last task.
+                self.skip_newlines_and_indents();
+
+                if self.indent_depth > 0
+                    && (self.check(&Token::Val)
+                        || self.check(&Token::Let)
+                        || self.check(&Token::While)
+                        || self.check(&Token::Function)
+                        || self.check(&Token::If)
+                        || self.check(&Token::For)
+                        || self.check(&Token::Call)
+                        || self.check(&Token::Return))
+                {
+                    // Dedent復元後のFor/Let/Return等はタスクbodyにappend可能
+                    // Top-level encountered non-Task token; appending statements to last task
+                    let stmts = self.parse_statements(false)?;
+                    if !stmts.is_empty() {
+                        if let Some(last) = program.tasks.last_mut() {
+                            last.body.extend(stmts);
+                        }
+                    } else {
+                        return Err(format!("Expected @task, got {:?}", self.current()));
                     }
                 } else {
                     return Err(format!("Expected @task, got {:?}", self.current()));
@@ -57,12 +81,12 @@ impl Parser {
     }
 
     fn parse_task(&mut self) -> Result<Task, String> {
-        eprintln!("DEBUG: parse_task start at pos={} indent_depth={} current={:?}", self.position, self.indent_depth, self.current());
+        // ...
         self.expect(&Token::Task)?;
-        
+
         let name = self.expect_identifier()?;
         self.skip_newlines();
-        
+
         // タスクの本体はインデントされる
         if self.check(&Token::Indent) {
             self.advance();
@@ -84,18 +108,18 @@ impl Parser {
         if self.check(&Token::Params) {
             self.advance();
             self.skip_newlines();
-            
+
             // paramsの後のインデントをチェック（オプション）
             if self.check(&Token::Indent) {
                 self.advance();
             }
-            
+
             while !self.check(&Token::Dedent) && !self.is_at_end() {
                 self.skip_newlines();
                 if self.check(&Token::Dedent) {
                     break;
                 }
-                
+
                 let param_name = self.expect_identifier()?;
                 self.expect(&Token::Colon)?;
                 let param_type = self.parse_type()?;
@@ -105,7 +129,7 @@ impl Parser {
                 });
                 self.skip_newlines();
             }
-            
+
             // Dedentがある場合は消費
             if self.check(&Token::Dedent) {
                 self.advance();
@@ -116,19 +140,21 @@ impl Parser {
         // body の解析
         self.expect(&Token::Body)?;
         self.skip_newlines();
-        
+
         // bodyの後のインデントをチェック（オプション）
-        let entry_depth = self.indent_depth;
         if self.check(&Token::Indent) {
             self.advance();
         }
+        // record entry depth after consuming the Indent so that
+        // consume_dedents_to restores to the correct level
+        let entry_depth = self.indent_depth;
 
-        let body = self.parse_statements()?;
+        let body = self.parse_statements(false)?;
 
         // bodyブロックから元の深さに戻るまでのDedentを消費
         self.consume_dedents_to(entry_depth);
 
-        eprintln!("DEBUG: parse_task end at pos={} indent_depth={} next={:?}", self.position, self.indent_depth, self.current());
+        // ...
         Ok(Task {
             name,
             mode,
@@ -155,12 +181,15 @@ impl Parser {
         }
     }
 
-    fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_statements(&mut self, stop_on_else: bool) -> Result<Vec<Statement>, String> {
         let mut statements = Vec::new();
 
-        while !self.check(&Token::Dedent) && !self.check(&Token::Else) && !self.is_at_end() {
+        while !self.check(&Token::Dedent)
+            && !(stop_on_else && self.check(&Token::Else))
+            && !self.is_at_end()
+        {
             self.skip_newlines();
-            if self.check(&Token::Dedent) || self.check(&Token::Else) {
+            if self.check(&Token::Dedent) || (stop_on_else && self.check(&Token::Else)) {
                 break;
             }
 
@@ -175,12 +204,16 @@ impl Parser {
         match self.current() {
             Token::Val => self.parse_val(),
             Token::Let => self.parse_let(),
+            Token::While => self.parse_while(),
             Token::Function => self.parse_function_def(),
             Token::If => self.parse_if(),
             Token::For => self.parse_for(),
             Token::Call => self.parse_call_statement(),
             Token::Return => self.parse_return(),
-            _ => Err(format!("Unexpected token in statement: {:?}", self.current())),
+            _ => Err(format!(
+                "Unexpected token in statement: {:?}",
+                self.current()
+            )),
         }
     }
 
@@ -204,9 +237,9 @@ impl Parser {
         self.expect(&Token::Function)?;
         let name = self.expect_identifier()?;
         self.skip_newlines();
-        
-        eprintln!("DEBUG: Parsing function: {}", name);
-        
+
+        // ...
+
         // @functionの本体はインデントされる
         if self.check(&Token::Indent) {
             self.advance();
@@ -218,7 +251,7 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             self.expect(&Token::LBracket)?;
-            
+
             while !self.check(&Token::RBracket) {
                 self.skip_newlines();
                 if self.check(&Token::RBracket) {
@@ -230,7 +263,7 @@ impl Parser {
                 }
                 self.skip_newlines();
             }
-            
+
             self.expect(&Token::RBracket)?;
             self.skip_newlines();
         }
@@ -238,21 +271,30 @@ impl Parser {
         // body の解析
         self.expect(&Token::Body)?;
         self.skip_newlines();
-        
+
         // bodyの後のインデントをチェック（オプション）
-        let entry_depth = self.indent_depth;
         if self.check(&Token::Indent) {
             self.advance();
         }
+        // record entry depth after consuming the Indent so that
+        // we can restore correctly later
+        let entry_depth = self.indent_depth;
 
-        let body = self.parse_statements()?;
+        let body = self.parse_statements(false)?;
 
-        eprintln!("DEBUG: Function {} body parsed, current token: {:?}", name, self.current());
+        // ...
 
-        // @function定義全体から抜けるためのDedentを消費して元の深さに戻す
-        // （関数内部で発生したインデント増減をここでまとめて戻す）
+        // 関数bodyを抜けた後、Dedent復元→skip_newlinesで次の文がタスクbodyに属するようにする
         self.consume_dedents_to(entry_depth);
-        eprintln!("DEBUG: Function {} next token: {:?}", name, self.current());
+        self.skip_newlines();
+        // ...
+
+        // 関数body終了後にReturn/Let/Val等が現れた場合はbodyにappendし続ける
+        let mut body = body;
+        while matches!(self.current(), Token::Return | Token::Let | Token::Val) {
+            body.push(self.parse_statement()?);
+            self.skip_newlines();
+        }
 
         Ok(Statement::FunctionDef(Function { name, args, body }))
     }
@@ -260,62 +302,78 @@ impl Parser {
     fn parse_if(&mut self) -> Result<Statement, String> {
         self.expect(&Token::If)?;
         self.skip_newlines();
-        
-        eprintln!("DEBUG: Parsing if statement");
-        
+
+        // ...
+
+        // remember the indentation level at the start of this if
+        let overall_entry = self.indent_depth;
+
+        // parse the condition (may be multi-line)
         let condition = self.parse_expression()?;
-
-        // 式の後に来る改行を先にスキップしてからDedentを消費する。
-        // これは条件式が複数行でインデントされている場合に、
-        // Newline->Dedent の順でトークンが来ることがあるため。
         self.skip_newlines();
 
-        // 条件式後に続く可能性のある複数のDedentを消費
-        while self.check(&Token::Dedent) {
-            self.advance();
-        }
-
+        // consume any Dedent tokens produced by condition parsing up to the
+        // level where the if started so that the following `Then` is found
+        // at the correct level.
+        self.consume_dedents_to(overall_entry);
         self.skip_newlines();
 
+        // expect Then
         self.expect(&Token::Then)?;
         self.skip_newlines();
-        
-        // thenの後のインデントをチェック（オプション）
-        if self.check(&Token::Indent) {
+
+        // parse then-branch (either indented block or inline)
+        let then_branch = if self.check(&Token::Indent) {
             self.advance();
-        }
-        
-        eprintln!("DEBUG: Parsing then branch");
-        let then_branch = self.parse_statements()?;
-        eprintln!("DEBUG: Then branch parsed, current token: {:?}", self.current());
-        
-        // then_branchブロックから出るDedentを1つだけ消費
-        if self.check(&Token::Dedent) {
-            self.advance();
-            eprintln!("DEBUG: Consumed 1 Dedent after then branch");
-        }
-        self.skip_newlines();
-        
-        let mut else_branch = Vec::new();
-        if self.check(&Token::Else) {
-            eprintln!("DEBUG: Parsing else branch");
-            self.advance();
-            self.skip_newlines();
-            
-            // elseの後のインデントをチェック（オプション）
-            if self.check(&Token::Indent) {
-                self.advance();
-            }
-            
-            else_branch = self.parse_statements()?;
-            eprintln!("DEBUG: Else branch parsed, current token: {:?}", self.current());
-            
-            // else_branchブロックから出るDedentを1つだけ消費
+            let then_entry = self.indent_depth;
+            // ...
+            let branch = self.parse_statements(true)?;
+            // consume the Dedent that closes the then block
             if self.check(&Token::Dedent) {
                 self.advance();
-                eprintln!("DEBUG: Consumed 1 Dedent after else branch, next token: {:?}", self.current());
+            } else {
+                // ensure we restore depth if parse_statements consumed nested dedents
+                self.consume_dedents_to(then_entry);
+            }
+            // ...
+            branch
+        } else {
+            // ...
+            let branch = self.parse_statements(true)?;
+            // ...
+            branch
+        };
+
+        // consume any dedents produced by then-branch parsing back to if entry level
+        self.consume_dedents_to(overall_entry);
+        self.skip_newlines();
+
+        // optional else
+        let mut else_branch = Vec::new();
+        if self.check(&Token::Else) {
+            // ...
+            self.advance();
+            self.skip_newlines();
+
+            if self.check(&Token::Indent) {
+                self.advance();
+                let else_entry = self.indent_depth;
+                else_branch = self.parse_statements(true)?;
+                if self.check(&Token::Dedent) {
+                    self.advance();
+                } else {
+                    self.consume_dedents_to(else_entry);
+                }
+                // ...
+            } else {
+                else_branch = self.parse_statements(true)?;
+                // ...
             }
         }
+
+        // restore indentation to where the if started
+        self.consume_dedents_to(overall_entry);
+        self.skip_newlines();
 
         Ok(Statement::If {
             condition,
@@ -328,32 +386,32 @@ impl Parser {
         self.expect(&Token::For)?;
         let var = self.expect_identifier()?;
         self.expect(&Token::In)?;
-        
+
         let start = self.parse_expression()?;
-        
+
         // startの後のDedentをスキップ（1つだけ）
         if self.check(&Token::Dedent) {
             self.advance();
         }
-        
+
         self.expect(&Token::Range)?;
         let end = self.parse_expression()?;
-        
+
         // endの後のDedentをスキップ（1つだけ）
         if self.check(&Token::Dedent) {
             self.advance();
         }
-        
+
         self.expect(&Token::Do)?;
         self.skip_newlines();
-        
+
         // doの後のインデントをチェック（オプション）
         if self.check(&Token::Indent) {
             self.advance();
         }
-        
-        let body = self.parse_statements()?;
-        
+
+        let body = self.parse_statements(false)?;
+
         // bodyブロックから出るDedentを1つだけ消費
         if self.check(&Token::Dedent) {
             self.advance();
@@ -367,42 +425,102 @@ impl Parser {
         })
     }
 
+    fn parse_while(&mut self) -> Result<Statement, String> {
+        self.expect(&Token::While)?;
+
+        // Two possible formats emitted by the transpiler:
+        // 1) Inline condition: `while <expr> do` (condition appears before `do`)
+        // 2) Block condition: `while condition do` followed by an indented expression
+        //    describing the condition, then the body statements at the same indent.
+
+        // Detect placeholder-style header: `while condition do`
+        let mut condition_opt: Option<Expression> = None;
+        if let Token::Identifier(name) = self.current() {
+            if name == "condition" {
+                // consume the placeholder identifier
+                self.advance();
+            } else {
+                // treat as inline condition (fallthrough)
+                condition_opt = Some(self.parse_expression()?);
+            }
+        } else if !self.check(&Token::Do) {
+            // if it's not immediately `do`, try parsing an inline condition
+            condition_opt = Some(self.parse_expression()?);
+        }
+
+        // after inline/placeholder part expect Do
+        self.expect(&Token::Do)?;
+        self.skip_newlines();
+
+        // now handle the indented block(s)
+        if self.check(&Token::Indent) {
+            self.advance();
+        }
+
+        // If we didn't already get a condition (placeholder case), the next
+        // indented expression is the condition. Record the entry depth so that
+        // parsing the (potentially multi-line) condition does not consume
+        // Dedent tokens that belong to the surrounding while-block.
+        let condition = if let Some(cond) = condition_opt {
+            cond
+        } else {
+            let cond_entry = self.indent_depth;
+            let cond = self.parse_expression()?;
+            // restore any dedents consumed by condition parsing back to
+            // the entry depth so the while body remains intact
+            self.consume_dedents_to(cond_entry);
+            self.skip_newlines();
+            cond
+        };
+
+        // The rest of the indented items at this level are the loop body
+        let body = self.parse_statements(false)?;
+
+        // consume one Dedent to leave the while block if present
+        if self.check(&Token::Dedent) {
+            self.advance();
+        }
+
+        Ok(Statement::While { condition, body })
+    }
+
     fn parse_call_statement(&mut self) -> Result<Statement, String> {
         self.expect(&Token::Call)?;
         let name = self.expect_identifier()?;
-        
+
         let mut args = Vec::new();
-        
+
         // 改行とインデントをスキップ
         self.skip_newlines_and_indents();
-        
+
         if self.check(&Token::Args) {
             self.advance();
             self.skip_newlines_and_indents();
-            
+
             // 2つの形式をサポート:
             // 1. args [expr1, expr2] (従来の形式)
             // 2. args\n  expr1\n  expr2 (新しい形式)
-            
+
             if self.check(&Token::LBracket) {
                 // 従来の形式: args [...]
                 self.advance();
-                
+
                 while !self.check(&Token::RBracket) {
                     args.push(self.parse_expression()?);
                     if self.check(&Token::Comma) {
                         self.advance();
                     }
                 }
-                
+
                 self.expect(&Token::RBracket)?;
             } else {
                 // 新しい形式: args の後にインデントされた式のリスト
                 // インデントをスキップ
-                let args_entry_depth = self.indent_depth;
                 if self.check(&Token::Indent) {
                     self.advance();
                 }
+                // record entry depth after consuming Indent
+                let args_entry_depth = self.indent_depth;
 
                 // 各引数を読む（Dedentが来るまで）
                 while !self.check(&Token::Dedent) && !self.is_at_end() {
@@ -439,9 +557,9 @@ impl Parser {
     fn parse_expression(&mut self) -> Result<Expression, String> {
         // 式の前の改行とインデントをスキップ
         self.skip_newlines_and_indents();
-        
+
         // デバッグ: 式をパースし始めるときの現在トークン
-        eprintln!("DEBUG: parse_expression current token: {:?}", self.current());
+        // ...
 
         match self.current() {
             Token::Literal => self.parse_literal_expr(),
@@ -458,13 +576,16 @@ impl Parser {
                 self.advance();
                 Ok(Expression::Literal(Literal::Int(num)))
             }
-            _ => Err(format!("Unexpected token in expression: {:?}", self.current())),
+            _ => Err(format!(
+                "Unexpected token in expression: {:?}",
+                self.current()
+            )),
         }
     }
 
     fn parse_literal_expr(&mut self) -> Result<Expression, String> {
         self.expect(&Token::Literal)?;
-        
+
         match self.current() {
             Token::Number(n) => {
                 let num = *n;
@@ -489,16 +610,19 @@ impl Parser {
     fn parse_binary(&mut self) -> Result<Expression, String> {
         self.expect(&Token::Binary)?;
 
-    // entry_depth は、子ノードをパースする直前に記録する。
-    // これにより、skip_newlines_and_indents によって新たに導入された
-    // インデント分までを正しく扱える。
+        // entry_depth は、子ノードをパースする直前に記録する。
+        // これにより、skip_newlines_and_indents によって新たに導入された
+        // インデント分までを正しく扱える。
 
         let op = if let Token::String(s) = self.current() {
             let op_str = s.clone();
             self.advance();
             op_str
         } else {
-            return Err(format!("Expected operator string, got {:?}", self.current()));
+            return Err(format!(
+                "Expected operator string, got {:?}",
+                self.current()
+            ));
         };
 
         self.skip_newlines_and_indents();
@@ -525,31 +649,31 @@ impl Parser {
     fn parse_call_expr(&mut self) -> Result<Expression, String> {
         self.expect(&Token::Call)?;
         let name = self.expect_identifier()?;
-        
+
         let mut args = Vec::new();
-        
+
         // 改行とインデントをスキップ
         self.skip_newlines_and_indents();
-        
+
         if self.check(&Token::Args) {
             self.advance();
             self.skip_newlines_and_indents();
-            
+
             // 2つの形式をサポート:
             // 1. args [expr1, expr2] (従来の形式)
             // 2. args\n  expr1\n  expr2 (新しい形式)
-            
+
             if self.check(&Token::LBracket) {
                 // 従来の形式: args [...]
                 self.advance();
-                
+
                 while !self.check(&Token::RBracket) {
                     args.push(self.parse_expression()?);
                     if self.check(&Token::Comma) {
                         self.advance();
                     }
                 }
-                
+
                 self.expect(&Token::RBracket)?;
             } else {
                 // 新しい形式: args の後にインデントされた式のリスト
@@ -591,13 +715,11 @@ impl Parser {
             match tok {
                 Token::Indent => {
                     self.indent_depth += 1;
-                    eprintln!("DEBUG: advance saw Indent -> indent_depth={}", self.indent_depth);
                 }
                 Token::Dedent => {
                     if self.indent_depth > 0 {
                         self.indent_depth -= 1;
                     }
-                    eprintln!("DEBUG: advance saw Dedent -> indent_depth={}", self.indent_depth);
                 }
                 _ => {}
             }
@@ -605,13 +727,12 @@ impl Parser {
     }
 
     fn consume_dedents_to(&mut self, target: usize) {
-        eprintln!("DEBUG: consume_dedents_to target={} current={}", target, self.indent_depth);
         let mut consumed = 0;
         while self.indent_depth > target && self.check(&Token::Dedent) {
             self.advance();
             consumed += 1;
         }
-        eprintln!("DEBUG: consume_dedents_to consumed={} now={}", consumed, self.indent_depth);
+        // ...
     }
 
     fn is_at_end(&self) -> bool {
@@ -654,7 +775,7 @@ impl Parser {
             self.advance();
         }
     }
-    
+
     fn skip_newlines_and_indents(&mut self) {
         while self.check(&Token::Newline) || self.check(&Token::Indent) {
             self.advance();

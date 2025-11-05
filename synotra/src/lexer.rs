@@ -174,12 +174,10 @@ impl<'a> Lexer<'a> {
             // otherwise fall back to number parsing (e.g. .5)
             match self.lex_number() {
                 Ok(n) => Token::Number(n),
-                // 数字でない場合は単一文字トークンとして扱う
+                // 数字でない場合はドットトークンとして扱う
                 Err(_) => {
-                    // ここでは一般的な1文字トークン一覧を明示的に扱います。
-                    // 将来的には複合演算子やコメントの扱いを追加できます。
                     self.advance_char();
-                    Token::Char(c)
+                    Token::Dot
                 }
             }
         } else if c.is_ascii_digit() {

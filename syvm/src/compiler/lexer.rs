@@ -95,7 +95,9 @@ impl Lexer {
                         return Err(format!("Unknown keyword: {}", word));
                     }
                 }
-                _ if ch.is_ascii_digit() || (ch == '-' && self.peek().map_or(false, |c| c.is_ascii_digit())) => {
+                _ if ch.is_ascii_digit()
+                    || (ch == '-' && self.peek().map_or(false, |c| c.is_ascii_digit())) =>
+                {
                     tokens.push(self.read_number()?);
                 }
                 _ if ch.is_alphabetic() || ch == '_' => {
@@ -107,7 +109,10 @@ impl Lexer {
                     }
                 }
                 _ => {
-                    return Err(format!("Unexpected character '{}' at line {}", ch, self.line));
+                    return Err(format!(
+                        "Unexpected character '{}' at line {}",
+                        ch, self.line
+                    ));
                 }
             }
         }
@@ -172,7 +177,7 @@ impl Lexer {
 
     fn read_identifier(&mut self) -> String {
         let mut result = String::new();
-        
+
         // @から始まる場合は@を含める
         if !self.is_at_end() && self.current_char() == '@' {
             result.push('@');
@@ -193,7 +198,7 @@ impl Lexer {
 
     fn read_number(&mut self) -> Result<Token, String> {
         let mut result = String::new();
-        
+
         if !self.is_at_end() && self.current_char() == '-' {
             result.push('-');
             self.advance();
@@ -204,7 +209,8 @@ impl Lexer {
             self.advance();
         }
 
-        result.parse::<i64>()
+        result
+            .parse::<i64>()
             .map(Token::Number)
             .map_err(|_| format!("Invalid number: {}", result))
     }
@@ -236,7 +242,7 @@ mod tests {
         let input = "@task main\n  body\n    val n = literal 100";
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize().unwrap();
-        
+
         assert_eq!(tokens[0], Token::Task);
         assert_eq!(tokens[1], Token::Identifier("main".to_string()));
     }

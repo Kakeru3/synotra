@@ -366,7 +366,7 @@ impl Parser {
     fn parse_postfix(&mut self) -> Result<Expr> {
         let mut expr = self.parse_primary()?;
         loop {
-            if self.consume_char('.') {
+            if self.consume_token(&Token::Dot) {
                 let method = self.expect_identifier()?;
                 let args = if self.consume_token(&Token::Lparen) {
                     let args = self.parse_argument_list()?;
@@ -420,6 +420,12 @@ impl Parser {
             return Err(anyhow!("expected identifier"));
         };
         self.advance();
+        // Assignment to an existing variable: `name = expr`
+        if self.consume_char('=') {
+            let expr = self.parse_expression()?;
+            return Ok(Expr::Let(name, Box::new(expr)));
+        }
+
         if matches!(self.current(), Token::Lparen) {
             self.advance();
             let args = self.parse_argument_list()?;

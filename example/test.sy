@@ -5,6 +5,7 @@ task main() distributed {
     // 複数の並列タスク呼び出し
     fibTasks(n)
     computeTasks(m)
+    fizzbuzz(n * 10)
 }
 
 task fibTasks(count: Int) distributed {

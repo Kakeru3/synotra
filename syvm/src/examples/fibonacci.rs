@@ -19,11 +19,7 @@ pub fn run_fibonacci_demo() {
     }
 
     // タスク依存例: Fib(41) = Fib(39) + Fib(40)
-    vm.add_task(
-        41,
-        vec![39, 40],
-        move || fibonacci(39) + fibonacci(40),
-    );
+    vm.add_task(41, vec![39, 40], move || fibonacci(39) + fibonacci(40));
 
     // --- 並列 ---
     let start = std::time::Instant::now();

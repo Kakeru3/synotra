@@ -11,7 +11,7 @@ pub fn is_prime(n: u64) -> bool {
     if n % 2 == 0 {
         return false;
     }
-    
+
     let limit = (n as f64).sqrt() as u64;
     for i in (3..=limit).step_by(2) {
         if n % i == 0 {
@@ -34,29 +34,27 @@ pub fn run_prime_demo() {
     // 1,000,000 から 2,000,000 までを10個の範囲に分割
     let base = 1_000_000;
     let range_size = 100_000;
-    
+
     for i in 0..10 {
         let start = base + i * range_size;
         let end = start + range_size - 1;
-        vm.add_task(
-            i as usize,
-            vec![],
-            move || count_primes_in_range(start, end)
-        );
+        vm.add_task(i as usize, vec![], move || {
+            count_primes_in_range(start, end)
+        });
     }
 
     // 依存タスク: すべての範囲の結果を合計
-    vm.add_task(
-        10,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        move || {
-            // このタスクは依存しているだけで、実際の合計は外で計算
-            0
-        }
-    );
+    vm.add_task(10, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9], move || {
+        // このタスクは依存しているだけで、実際の合計は外で計算
+        0
+    });
 
     println!("=== Prime Counting Demo ===");
-    println!("Counting primes in range: {}-{}", base, base + range_size * 10);
+    println!(
+        "Counting primes in range: {}-{}",
+        base,
+        base + range_size * 10
+    );
     println!();
 
     // --- 並列 ---
