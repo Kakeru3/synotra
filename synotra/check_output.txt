@@ -1,0 +1,58 @@
+    Checking synotra v0.1.0 (/Volumes/1TB SSD/develop/synotra/synotra)
+error[E0433]: failed to resolve: use of undeclared type `Definition`
+  --> src/main.rs:43:32
+   |
+43 |                         if let Definition::Actor(actor_def) = def {
+   |                                ^^^^^^^^^^ use of undeclared type `Definition`
+   |
+help: consider importing this enum
+   |
+ 8 + use crate::ast::Definition;
+   |
+
+error[E0433]: failed to resolve: use of undeclared type `ActorMember`
+  --> src/main.rs:46:40
+   |
+46 | ...                   if let ActorMember::Method(func) = member {
+   |                              ^^^^^^^^^^^ use of undeclared type `ActorMember`
+   |
+help: consider importing this enum
+   |
+ 8 + use crate::ast::ActorMember;
+   |
+
+warning: unused variable: `ty`
+   --> src/sema.rs:129:25
+    |
+129 |         Stmt::Let(name, ty, expr) => {
+    |                         ^^ help: if this is intentional, prefix it with an underscore: `_ty`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `ty`
+   --> src/sema.rs:133:25
+    |
+133 |         Stmt::Var(name, ty, expr) => {
+    |                         ^^ help: if this is intentional, prefix it with an underscore: `_ty`
+
+warning: unused variable: `rhs_ty`
+   --> src/sema.rs:207:17
+    |
+207 |             let rhs_ty = analyze_expr(rhs, symbols, is_io_context)?;
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rhs_ty`
+
+warning: unused variable: `target`
+   --> src/sema.rs:210:20
+    |
+210 |         Expr::Call(target, method, args) => {
+    |                    ^^^^^^ help: if this is intentional, prefix it with an underscore: `_target`
+
+warning: unused variable: `target`
+   --> src/codegen.rs:242:24
+    |
+242 |             Expr::Call(target, method, args) => {
+    |                        ^^^^^^ help: if this is intentional, prefix it with an underscore: `_target`
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `synotra` (bin "synotra") generated 5 warnings
+error: could not compile `synotra` (bin "synotra") due to 2 previous errors; 5 warnings emitted

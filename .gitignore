@@ -1,12 +1,22 @@
-synotra/target
-syvm/target
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
 
+# Generated IR files
+*.syi
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-synotra/.DS_Store
-syvm/.DS_Store
+Thumbs.db
 
-.todo
-synotra/.todo
-syvm/.todo
-
-example/test/
+# Logs
+*.log

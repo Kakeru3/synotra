@@ -1,128 +1,68 @@
-mod compiler;
-mod examples;
-mod interpreter;
-mod vm;
+mod bytecode;
+mod actor;
+mod runtime;
 
-use compiler::{lexer::Lexer, parser::Parser};
-use interpreter::Interpreter;
-use std::env;
+use clap::Parser;
 use std::fs;
-use std::time::Instant;
-use rayon::ThreadPoolBuilder;
+use bytecode::{IrProgram, Value};
+use runtime::Runtime;
+use actor::Message;
+use std::collections::HashMap;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    // --comp <file> [runs]: 比較実行モード（シングルスレッド vs 並列）
-    if args.len() > 1 && args[1] == "--comp" {
-        if args.len() < 3 {
-            eprintln!("Usage: syvm --comp <file.syi> [runs]");
-            return;
-        }
-        let file_path = &args[2];
-        let runs: usize = if args.len() > 3 {
-            args[3].parse().unwrap_or(3)
-        } else {
-            3
-        };
-
-    // ソースを読み込み、1回だけ解析して AST を作成します
-        let source = fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read {}", file_path));
-        let mut lexer = compiler::lexer::Lexer::new(&source);
-        let tokens = lexer.tokenize().expect("Failed to tokenize");
-        let mut parser = compiler::parser::Parser::new(tokens);
-        let program = parser.parse().expect("Failed to parse");
-
-        let interpreter = interpreter::Interpreter::new(program.clone());
-
-        println!("Comparing single-threaded (1) vs parallel (default) for {} runs on {}", runs, file_path);
-
-    // シングルスレッド実行（rayon のプールを 1 スレッドにして実行）
-        let mut single_times = Vec::new();
-        for i in 0..runs {
-            let pool = ThreadPoolBuilder::new().num_threads(1).build().expect("Failed to build rayon pool");
-            let start = Instant::now();
-            pool.install(|| {
-                interpreter.run().expect("Program failed during single-threaded run");
-            });
-            let dur = start.elapsed();
-            println!("single run {}: {:?}", i + 1, dur);
-            single_times.push(dur.as_secs_f64());
-        }
-
-    // 並列実行（デフォルトの rayon プール）
-        let mut parallel_times = Vec::new();
-        for i in 0..runs {
-            let pool = ThreadPoolBuilder::new().build().expect("Failed to build rayon pool");
-            let start = Instant::now();
-            pool.install(|| {
-                interpreter.run().expect("Program failed during parallel run");
-            });
-            let dur = start.elapsed();
-            println!("parallel run {}: {:?}", i + 1, dur);
-            parallel_times.push(dur.as_secs_f64());
-        }
-
-        let avg = |v: &Vec<f64>| v.iter().sum::<f64>() / (v.len() as f64);
-        let single_avg = avg(&single_times);
-        let parallel_avg = avg(&parallel_times);
-        println!("\naverage single-threaded: {:.6}s", single_avg);
-        println!("average parallel: {:.6}s", parallel_avg);
-        if parallel_avg > 0.0 {
-            println!("speedup (single / parallel): {:.3}x", single_avg / parallel_avg);
-        }
-        return;
-    }
-
-    // ファイル指定がある場合はそのファイルを実行
-    if args.len() > 1 {
-        let file_path = &args[1];
-        run_syi_file(file_path);
-        return;
-    }
-
-    // デフォルトはデモ実行
-    println!("=== Synotra VM Demo ===\n");
-
-    println!("\n{}\n", "=".repeat(60));
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Input IR file (.syi)
+    input: String,
 }
 
-fn run_syi_file(file_path: &str) {
-    println!("=== Running {} ===\n", file_path);
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+async fn main() {
+    let args = Args::parse();
+    let src = fs::read_to_string(&args.input).expect("Failed to read input file");
 
-    // .syi ファイルを読み込み
-    let source =
-        fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read {}", file_path));
+    let program: IrProgram = serde_json::from_str(&src).expect("Failed to parse IR");
+    println!("Loaded Program with {} actors", program.actors.len());
 
-    // 字句解析
-    let mut lexer = Lexer::new(&source);
-    let tokens = lexer.tokenize().expect("Failed to tokenize");
+    let mut runtime = Runtime::new();
 
-    // デバッグ: トークン列を出力（簡略版）
-    if std::env::var("DEBUG_TOKENS").is_ok() {
-        eprintln!("DEBUG: Tokens:");
-        for (i, token) in tokens.iter().enumerate() {
-            eprintln!("  [{}]: {:?}", i, token);
+    // Spawn ALL actors from the program
+    let actors_vec: Vec<_> = program.actors.into_iter().collect();
+    
+    // Collect actor names BEFORE moving actors_vec
+    let actor_names: Vec<String> = actors_vec.iter().map(|a| a.name.clone()).collect();
+    
+    runtime.spawn_all(actors_vec, |name| {
+        let mut state = HashMap::new();
+        state.insert("name".to_string(), Value::ConstString(name.to_string()));
+        state
+    });
+
+    println!("Spawned {} actor(s)", runtime.actor_count());
+
+    // Send "run" message to ALL actors for parallel execution
+    if !actor_names.is_empty() {
+        println!("Starting parallel execution...");
+        
+        let start = std::time::Instant::now();
+        
+        for actor_name in &actor_names {
+            runtime.send(actor_name, Message {
+                name: "run".to_string(),
+                args: vec![],
+                reply_to: None,
+            }).await;
         }
+
+        // Wait for all actors to complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        let elapsed = start.elapsed();
+        println!("\n⏱️  Parallel execution time: {:?}", elapsed);
+    } else {
+        println!("No actors found in the program");
     }
 
-    // 構文解析
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse().expect("Failed to parse");
-
-    // デバッグ: パースされたプログラムを出力（必要なときは環境変数 DEBUG_PARSED を設定）
-    if std::env::var("DEBUG_PARSED").is_ok() {
-        eprintln!("DEBUG: Parsed program:");
-        for task in &program.tasks {
-            eprintln!("  Task: {}", task.name);
-            eprintln!("    Params: {:?}", task.params);
-            eprintln!("    Body statements: {}", task.body.len());
-            for (i, stmt) in task.body.iter().enumerate() {
-                eprintln!("      [{}]: {:?}", i, stmt);
-            }
-        }
-    }
-
-    // 実行
-    let interpreter = Interpreter::new(program);
-    interpreter.run().expect("Failed to run program");
+    // Keep alive for a bit
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 }

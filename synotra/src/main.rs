@@ -1,43 +1,80 @@
-mod ast;
-mod codegen;
-mod emitter;
 mod lexer;
+mod ast;
 mod parser;
-mod repl;
-mod token;
+mod sema;
+mod ir;
+mod codegen;
 
-use crate::parser::Parser;
-use std::env;
-use std::path::Path;
+use clap::Parser as ClapParser;
+use logos::Logos;
+use chumsky::Parser;
+use std::fs;
+use crate::lexer::Token;
+
+#[derive(ClapParser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Input file
+    input: String,
+}
 
 fn main() {
-    // 起動時の引数に応じてREPLモードかファイル実行モードかを切り替え
-    // 最初の引数をファイルパスとして扱う
-    // それ以外はREPLモード
-    // cargo run で動かす場合、REPLモード、cargo run -- x.synotra でファイル実行モード
-    let mut args = env::args().skip(1);
-    if let Some(path) = args.next() {
-        let p = Path::new(&path);
-    // デバッグ用の特別オプション: `--lex <file>` を指定すると字句解析結果を表示します
-        if path == "--lex" {
-            if let Some(fpath) = args.next() {
-                let content = std::fs::read_to_string(&fpath).unwrap_or_default();
-                let toks = Parser::lex_all(&content);
-                println!("Tokens:\n{:?}", toks);
-                return;
-            }
-        }
-        if p.exists() {
-            if let Err(e) = repl::run_file(p) {
-                eprintln!("Error running file {}: {}", path, e);
-            }
-            return;
-        } else {
-            eprintln!("File not found: {}", path);
-        }
-    }
+    let args = Args::parse();
+    let src = fs::read_to_string(&args.input).expect("Failed to read input file");
 
-    if let Err(e) = repl::run_repl() {
-        eprintln!("Error running REPL: {}", e);
+    let lexer = Token::lexer(&src);
+    let tokens: Vec<_> = lexer.filter_map(|t| t.ok()).collect(); // TODO: Handle errors
+    println!("Tokens: {:?}", tokens);
+
+    let parser = parser::parser();
+    let result = parser.parse(tokens);
+
+    match result {
+        Ok(program) => {
+            println!("{:#?}", program);
+            match sema::analyze(&program) {
+                Ok(_) => {
+                    println!("Semantic analysis passed");
+                    use ir::{IrProgram, IrActor};
+                    use codegen::Codegen;
+                    use ast::{Definition, ActorMember};
+                    let mut ir_program = IrProgram { actors: Vec::new() };
+
+                    for def in &program.definitions {
+                        if let Definition::Actor(actor_def) = def {
+                            let mut handlers = Vec::new();
+                            for member in &actor_def.members {
+                                if let ActorMember::Method(func) = member {
+                                    let mut codegen = Codegen::new();
+                                    let handler = codegen.generate(func);
+                                    handlers.push(handler);
+                                }
+                            }
+                            ir_program.actors.push(IrActor {
+                                name: actor_def.name.clone(),
+                                handlers,
+                            });
+                        }
+                    }
+                    
+                    let json = serde_json::to_string_pretty(&ir_program).unwrap();
+                    println!("IR Output:\n{}", json);
+                    
+                    // Write to .syi file (support both .sy and .syo extensions)
+                    let output_path = if args.input.ends_with(".sy") {
+                        args.input.replace(".sy", ".syi")
+                    } else {
+                        args.input.replace(".syo", ".syi")
+                    };
+                    fs::write(output_path, json).expect("Failed to write IR file");
+                },
+                Err(e) => println!("Semantic error: {}", e),
+            }
+        },
+        Err(errs) => {
+            for err in errs {
+                println!("Parse error: {:?}", err);
+            }
+        }
     }
 }

@@ -1,0 +1,86 @@
+// --- データとメッセージの定義 ---
+
+// 実行開始メッセージ
+class Start()
+
+// アクターに渡す初期設定 (計算の上限と、自身の参照を渡す想定)
+data class ComputationConfig(val limit: Int)
+
+// 並列計算の結果を表現するデータクラス
+data class FizzBuzzResult(val number: Int, val output: String)
+
+
+// --- 純粋関数 (自動並列化の対象) ---
+
+// この関数は副作用がないため、コンパイラによって自動並列化の対象となる。
+// 返り値は FizzBuzzResult 型
+fun checkFizzBuzz(n: Int): FizzBuzzResult {
+    var output = ""
+    
+    // 純粋な計算ロジック
+    if (n % 3 == 0) {
+        output = "Fizz"
+    }
+    if (n % 5 == 0) {
+        output += "Buzz"
+    }
+    
+    if (output.isEmpty()) {
+        output = n.toString()
+    }
+    
+    return FizzBuzzResult(n, output)
+}
+
+
+// --- アクター定義 ---
+
+actor FizzBuzzCoordinator() {
+    // I/O操作を宣言。ランタイムはこれをI/Oプールに委譲します。
+    io fun print(msg: String) { 
+        // 実際にはログファイルへの書き込みやコンソール出力を行う I/O ロジック
+    }
+
+    // 外部からの実行開始メッセージを受信
+    fun receive(config: ComputationConfig) {
+        print("--- Starting FizzBuzz (Limit: ${config.limit}) ---")
+        
+        // 1. データ生成
+        val numbers = (1..config.limit).toList()
+        
+        // 2. ★ 超並列計算の実行と待機 ★
+        // .mapParallel はコンパイラによって自動的に FORK_TASK に変換され、
+        // データをチャンクに分割し、複数のコアで並列実行されます。
+        val results = numbers.mapParallel { num -> 
+            checkFizzBuzz(num)
+        }
+        
+        // 3. 結果の表示（I/O処理）
+        // .forEach 内で io fun が呼ばれるため、処理全体がI/Oコンテキストに委譲されます。
+        results.forEach { result ->
+            print("${result.number}: ${result.output}")
+        }
+        
+        print("--- Computation complete ---")
+        
+        // 役割が終了したので、アクターを停止し、メモリを解放する
+        self.stop() 
+    }
+}
+
+
+// --- 実行開始点 ---
+
+// main 関数は即座に終了する
+fun main() {
+    val LIMIT = 100_000 
+    
+    // 1. コーディネーターアクターを起動
+    val coordinatorRef = runtime.spawn(FizzBuzzCoordinator::class) 
+
+    // 2. 実行開始メッセージを非同期送信 (Fire-and-Forget)
+    coordinatorRef.send(ComputationConfig(LIMIT))
+    
+    // ★ ここで main 関数は終了する ★
+    // システム全体は、起動したアクターランタイムとスレッドプールが維持する。
+}

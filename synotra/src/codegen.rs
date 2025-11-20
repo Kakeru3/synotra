@@ -1,341 +1,277 @@
-use crate::ast::Task;
-use crate::ast::{Expr, Function, Prototype};
-use anyhow::{Result, anyhow};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
+use crate::ast::*;
+use crate::ir::*;
+use crate::ast::BinaryOp;
+use crate::ir::Terminator;
+use crate::ir::Instruction;
 
-#[derive(Default)]
-pub struct CodeGen {
-    // モジュールレベルの要素をテキストスニペットとして収集します
-    items: Vec<String>,
-    // 登録済みプロトタイプ（名前 -> 引数リスト）
-    protos: HashMap<String, Vec<String>>,
+pub struct Codegen {
+    blocks: Vec<BasicBlock>,
+    current_block_idx: usize,
+    var_counter: usize,
 }
 
-impl CodeGen {
-    pub fn new(_module_name: &str) -> Self {
-        Self {
-            items: Vec::new(),
-            protos: HashMap::new(),
+impl Codegen {
+    pub fn new() -> Self {
+        Codegen {
+            blocks: Vec::new(),
+            current_block_idx: 0,
+            var_counter: 0,
         }
     }
 
-    pub fn register_task_name<S: AsRef<str>>(&mut self, name: S) {
-        let _ = name;
+    fn new_var(&mut self) -> String {
+        self.var_counter += 1;
+        format!("v{}", self.var_counter)
     }
 
-    /// モジュールのテキスト表現を返します（収集したアイテムを連結したもの）
-    pub fn module(&self) -> String {
-        self.items.join("\n")
+    fn new_block(&mut self) {
+        let idx = self.blocks.len();
+        self.blocks.push(BasicBlock {
+            id: idx,
+            instrs: Vec::new(),
+            terminator: Terminator::Jump(999999), // Placeholder, should be overwritten
+        });
+        self.current_block_idx = idx;
     }
 
-    pub fn codegen_proto(&mut self, proto: &Prototype) -> Result<()> {
-        // プロトタイプを記録します
-        self.protos.insert(proto.name.clone(), proto.args.clone());
-        Ok(())
+    fn new_block_index(&mut self) -> usize {
+        let idx = self.blocks.len();
+        self.blocks.push(BasicBlock {
+            id: idx,
+            instrs: Vec::new(),
+            terminator: Terminator::Jump(999999), // Placeholder
+        });
+        idx
+    }
+    
+    fn switch_to_block(&mut self, idx: usize) {
+        self.current_block_idx = idx;
     }
 
-    pub fn codegen_function(&mut self, function: &Function) -> Result<String> {
-    // 関数を IR ブロックとして出力します。.syi との互換性のために @function 形式で出します
-        let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("@function {}", function.proto.name));
-        if !function.proto.args.is_empty() {
-            let args_repr = format!("[{}]", function.proto.args.join(", "));
-            lines.push(format!("  args {}", args_repr));
+    fn current_block_mut(&mut self) -> &mut BasicBlock {
+        &mut self.blocks[self.current_block_idx]
+    }
+
+    pub fn generate(mut self, func: &FunctionDef) -> IrHandler {
+        // Create entry block
+        self.new_block();
+        
+        for stmt in &func.body.stmts {
+            self.gen_stmt(stmt);
         }
-        lines.push("  body".to_string());
-        self.emit_expr_into(&function.body, 2, &mut lines)?;
-        let text = lines.join("\n") + "\n";
-        self.items.push(text.clone());
-        Ok(function.proto.name.clone())
+        
+        // Ensure terminator
+        if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+            self.current_block_mut().terminator = Terminator::Return(None);
+        }
+
+        IrHandler {
+            name: func.name.clone(),
+            blocks: self.blocks.drain(..).collect(),
+        }
     }
 
-    pub fn codegen_anonymous(&mut self, func: &Function) -> Result<(String, String)> {
-    // 以前の挙動に倣い、一意の名前となるよう調整します
-        let mut name = func.proto.name.clone();
-        if self.protos.contains_key(&name)
-            || self
-                .items
-                .iter()
-                .any(|it| it.contains(&format!("@function {}", name)))
-        {
-            let mut i = 0;
-            loop {
-                let cand = format!("{}{}", name, i);
-                if !self
-                    .items
-                    .iter()
-                    .any(|it| it.contains(&format!("@function {}", cand)))
-                {
-                    name = cand;
-                    break;
-                }
-                i += 1;
+    fn gen_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Let(name, _, expr) => {
+                let val = self.gen_expr(expr);
+                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
             }
-        }
-        let proto = Prototype {
-            name: name.clone(),
-            args: func.proto.args.clone(),
-        };
-        let func2 = Function {
-            proto,
-            body: func.body.clone(),
-        };
-        let _ = self.codegen_function(&func2)?;
-        // 名前とモジュールのテキストを返します
-        Ok((name, self.module()))
-    }
-
-    pub fn render_task(&mut self, task: &Task) -> Result<String> {
-        self.register_task_name(&task.name);
-
-        let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("@task {}", task.name));
-        if let Some(ref m) = task.mode {
-            lines.push(format!("  mode {}", m));
-        }
-        if !task.params.is_empty() {
-            lines.push("  params".to_string());
-            for (n, t) in &task.params {
-                if t.is_empty() {
-                    lines.push(format!("    {}", n));
+            Stmt::Var(name, _, expr) => {
+                let val = self.gen_expr(expr);
+                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
+            }
+            Stmt::Assign(name, expr) => {
+                let val = self.gen_expr(expr);
+                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
+            }
+            Stmt::Expr(expr) => {
+                self.gen_expr(expr);
+            }
+            Stmt::Return(expr) => {
+                let val = if let Some(e) = expr {
+                    Some(self.gen_expr(e))
                 } else {
-                    lines.push(format!("    {}: {}", n, t));
-                }
-            }
-        }
-        lines.push("  body".to_string());
-    // ブロック内の文は既存の emit_expr_into を使って出力します
-        match &task.body {
-            Expr::Block(stmts) => {
-                for stmt in stmts.iter() {
-                    self.emit_expr_into(stmt, 2, &mut lines)?;
-                }
-            }
-            other => {
-                self.emit_expr_into(other, 2, &mut lines)?;
-            }
-        }
-
-        let ar_text = lines.join("\n") + "\n";
-        Ok(ar_text)
-    }
-
-    /// REPL から単一タスクをファイルに書き出すための便利ヘルパ
-    pub fn codegen_task_to_path(&mut self, task: &Task, out_path: &Path) -> Result<String> {
-        let ar_text = self.render_task(task)?;
-        let mut f = File::create(out_path)?;
-        f.write_all(ar_text.as_bytes())?;
-        Ok(out_path.to_string_lossy().to_string())
-    }
-
-    fn emit_expr_into(&self, expr: &Expr, indent: usize, out: &mut Vec<String>) -> Result<()> {
-        let pad = "  ".repeat(indent);
-        match expr {
-            Expr::Number(n) => {
-                out.push(format!("{}literal {}", pad, n));
-            }
-            Expr::Variable(name) => {
-                out.push(format!("{}var {}", pad, name));
-            }
-            Expr::Binary(op, lhs, rhs) => {
-                // 演算子文字を syi 形式の文字列に変換
-                let op_str = match op {
-                    '*' => "*",
-                    '/' => "/",
-                    '%' => "%",
-                    '+' => "+",
-                    '-' => "-",
-                    '<' => "<",
-                    '>' => ">",
-                    'l' => "<=",  // <= (LessEqual)
-                    'g' => ">=",  // >= (GreaterEqual)
-                    '=' => "==",  // == (EqualEqual)
-                    'n' => "!=",  // != (NotEqual)
-                    '&' => "&&",  // && (And)
-                    '|' => "||",  // || (Or)
-                    _ => "?",     // 未知の演算子
+                    None
                 };
-                out.push(format!("{}binary \"{}\"", pad, op_str));
-                self.emit_expr_into(lhs, indent + 1, out)?;
-                self.emit_expr_into(rhs, indent + 1, out)?;
+                self.current_block_mut().terminator = Terminator::Return(val);
+                // Unreachable code after return, but we need to keep pushing to a valid block
+                // Create a dead block to catch subsequent instructions
+                self.new_block();
             }
-            Expr::If(cond, then_e, else_e) => {
-                out.push(format!("{}if", pad));
-                self.emit_expr_into(cond, indent + 1, out)?;
-                out.push(format!("{}then", pad));
-                self.emit_expr_into(then_e, indent + 1, out)?;
-                out.push(format!("{}else", pad));
-                self.emit_expr_into(else_e, indent + 1, out)?;
+            Stmt::If(cond, then_block, else_block) => {
+                let cond_val = self.gen_expr(cond);
+
+                let then_idx = self.new_block_index();
+                let else_idx = self.new_block_index();
+                let merge_idx = self.new_block_index();
+
+                // Jump from current
+                let false_target = if else_block.is_some() { else_idx } else { merge_idx };
+                self.current_block_mut().terminator = Terminator::JumpCond(cond_val, then_idx, false_target);
+
+                // Then block
+                self.switch_to_block(then_idx);
+                for s in &then_block.stmts {
+                    self.gen_stmt(s);
+                }
+                // Jump to merge if no explicit return
+                if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+                    self.current_block_mut().terminator = Terminator::Jump(merge_idx);
+                }
+
+                // Else block
+                if let Some(else_block) = else_block {
+                    self.switch_to_block(else_idx);
+                    for s in &else_block.stmts {
+                        self.gen_stmt(s);
+                    }
+                    // Jump to merge if no explicit return
+                    if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+                        self.current_block_mut().terminator = Terminator::Jump(merge_idx);
+                    }
+                }
+
+                // Merge block
+                self.switch_to_block(merge_idx);
             }
-            Expr::Call { name, args } => {
-                // 引数が単純な場合（変数、数値、文字列のみ）は1行で出力
-                let all_simple = args.iter().all(|arg| matches!(arg, Expr::Variable(_) | Expr::Number(_) | Expr::String(_)));
+            Stmt::While(cond, body) => {
+                let header_idx = self.new_block_index();
+                let body_idx = self.new_block_index();
+                let exit_idx = self.new_block_index();
+
+                // Jump to header
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Header: check condition
+                self.switch_to_block(header_idx);
+                let cond_val = self.gen_expr(cond);
+                self.current_block_mut().terminator = Terminator::JumpCond(cond_val, body_idx, exit_idx);
+
+                // Body
+                self.switch_to_block(body_idx);
+                for s in &body.stmts {
+                    self.gen_stmt(s);
+                }
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Exit
+                self.switch_to_block(exit_idx);
+            }
+            Stmt::For(iter, start, end, body) => {
+                // Desugar to while loop:
+                // var iter = start
+                // while (iter < end) { ...; iter = iter + 1 }
+
+                // Init
+                let start_val = self.gen_expr(start);
+                self.current_block_mut().instrs.push(Instruction::Assign(iter.clone(), start_val));
+
+                let header_idx = self.new_block_index();
+                let body_idx = self.new_block_index();
+                let exit_idx = self.new_block_index();
+
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Header: iter < end
+                self.switch_to_block(header_idx);
+                let end_val = self.gen_expr(end); // Re-eval end? Or eval once? Assuming eval once for now implies we should store it.
+                // For simplicity re-eval end expression (might be side-effecty, but usually const/var).
+                // Better: var _end = end;
+                // Let's stick to simple re-eval or assume it's a var/const for now.
+
+                let iter_val = Value::Var(iter.clone());
+                let cond_res = self.new_var();
+                self.current_block_mut().instrs.push(Instruction::BinOp {
+                    result: cond_res.clone(),
+                    op: "lt".to_string(),
+                    lhs: iter_val.clone(),
+                    rhs: end_val
+                });
+                self.current_block_mut().terminator = Terminator::JumpCond(Value::Var(cond_res), body_idx, exit_idx);
+
+                // Body
+                self.switch_to_block(body_idx);
+                for s in &body.stmts {
+                    self.gen_stmt(s);
+                }
+
+                // Increment
+                let inc_res = self.new_var();
+                self.current_block_mut().instrs.push(Instruction::BinOp {
+                    result: inc_res.clone(),
+                    op: "add".to_string(),
+                    lhs: Value::Var(iter.clone()),
+                    rhs: Value::ConstInt(1),
+                });
+                self.current_block_mut().instrs.push(Instruction::Assign(iter.clone(), Value::Var(inc_res)));
+
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Exit
+                self.switch_to_block(exit_idx);
+            }
+            _ => {}
+        }
+    }
+
+    fn gen_expr(&mut self, expr: &Expr) -> Value {
+        match expr {
+            Expr::Literal(lit) => match lit {
+                Literal::Int(i) => Value::ConstInt(*i),
+                Literal::String(s) => Value::ConstString(s.clone()),
+                Literal::Bool(b) => Value::ConstInt(if *b { 1 } else { 0 }), // Bool as int
+            },
+            Expr::Variable(name) => Value::Var(name.clone()),
+            Expr::BinaryOp(lhs, op, rhs) => {
+                let l = self.gen_expr(lhs);
+                let r = self.gen_expr(rhs);
+                let res = self.new_var();
+
+                let op_str = match op {
+                    BinaryOp::Add => "add",
+                    BinaryOp::Sub => "sub",
+                    BinaryOp::Mul => "mul",
+                    BinaryOp::Div => "div",
+                    BinaryOp::Eq => "eq",
+                    BinaryOp::Ne => "ne",
+                    BinaryOp::Lt => "lt",
+                    BinaryOp::Le => "le",
+                    BinaryOp::Gt => "gt",
+                    BinaryOp::Ge => "ge",
+                };
+
+                self.current_block_mut().instrs.push(Instruction::BinOp {
+                    result: res.clone(),
+                    op: op_str.to_string(),
+                    lhs: l,
+                    rhs: r,
+                });
+                Value::Var(res)
+            }
+            Expr::Call(target, method, args) => {
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
+                let res = self.new_var();
                 
-                if all_simple {
-                    out.push(self.render_call_line(&pad, name, args));
+                // Check if IO or Pure (simplified)
+                // In real impl, we check symbol table. Assuming Pure for now unless "print"
+                let func_name = method.clone();
+                if func_name == "print" {
+                     self.current_block_mut().instrs.push(Instruction::CallIo {
+                        result: res.clone(),
+                        func: func_name,
+                        args: arg_vals,
+                    });
                 } else {
-                    // 複雑な引数がある場合は展開する
-                    out.push(format!("{}call {}", pad, name));
-                    if !args.is_empty() {
-                        out.push(format!("{}  args", pad));
-                        for arg in args {
-                            self.emit_expr_into(arg, indent + 2, out)?;
-                        }
-                    }
+                     self.current_block_mut().instrs.push(Instruction::CallPure {
+                        result: res.clone(),
+                        func: func_name,
+                        args: arg_vals,
+                    });
                 }
-            }
-            Expr::String(s) => {
-                out.push(format!("{}literal \"{}\"", pad, s));
-            }
-            Expr::Let(name, val) => {
-                if let Some(inline) = self.inline_expr(val) {
-                    out.push(format!("{}let {} = {}", pad, name, inline));
-                } else {
-                    out.push(format!("{}let {} =", pad, name));
-                    self.emit_expr_into(val, indent + 1, out)?;
-                }
-            }
-            Expr::Val(name, val) => {
-                if let Some(inline) = self.inline_expr(val) {
-                    out.push(format!("{}val {} = {}", pad, name, inline));
-                } else {
-                    out.push(format!("{}val {} =", pad, name));
-                    self.emit_expr_into(val, indent + 1, out)?;
-                }
-            }
-            Expr::For {
-                var,
-                start,
-                end,
-                body,
-            } => {
-                // for ヘッダを出力します
-                // start と end は式なので、単純な場合は見やすくインライン表示を試みます
-                let mut hdr = format!("{}for {} in ", pad, var);
-                // start と end が両方単純な式なら、見やすさのために inline で start..end として出力します
-                match (&**start, &**end) {
-                    (Expr::Number(n1), Expr::Variable(v2)) => {
-                        hdr.push_str(&format!("{}..{}", n1, v2));
-                    }
-                    (Expr::Variable(v1), Expr::Variable(v2)) => {
-                        hdr.push_str(&format!("{}..{}", v1, v2));
-                    }
-                    (Expr::Number(n1), Expr::Number(n2)) => {
-                        hdr.push_str(&format!("{}..{}", n1, n2));
-                    }
-                    _ => {
-                        hdr.push_str("range");
-                    }
-                }
-                hdr.push_str(" do");
-                out.push(hdr);
-                // 本体の文を出力します
-                for stmt in body.iter() {
-                    self.emit_expr_into(stmt, indent + 1, out)?;
-                }
-            }
-            Expr::While { condition, body } => {
-                // while ヘッダを出力します
-                let mut hdr = format!("{}while ", pad);
-                // 条件式が単純ならインライン化して見やすく出力します
-                if let Some(inline_cond) = self.inline_expr(condition) {
-                    hdr.push_str(&inline_cond);
-                } else {
-                    hdr.push_str("condition");
-                }
-                hdr.push_str(" do");
-                out.push(hdr);
-                // インライン化されなかった場合は条件式を別行で出力します
-                if self.inline_expr(condition).is_none() {
-                    self.emit_expr_into(condition, indent + 1, out)?;
-                }
-                // 本体の文を出力します
-                for stmt in body.iter() {
-                    self.emit_expr_into(stmt, indent + 1, out)?;
-                }
-            }
-            Expr::Block(stmts) => {
-                for s in stmts.iter() {
-                    self.emit_expr_into(s, indent, out)?;
-                }
-            }
-            Expr::Return(e) => {
-                if let Some(inline) = self.inline_expr(e) {
-                    out.push(format!("{}return {}", pad, inline));
-                } else {
-                    out.push(format!("{}return", pad));
-                    self.emit_expr_into(e, indent + 1, out)?;
-                }
-            }
-            Expr::Function { proto, body } => {
-                // codegen_function と同じフォーマットを再利用します
-                out.push(format!("{}@function {}", pad, proto.name));
-                let inner_pad = "  ".repeat(indent + 1);
-                if !proto.args.is_empty() {
-                    let args_repr = format!("[{}]", proto.args.join(", "));
-                    out.push(format!("{}args {}", inner_pad, args_repr));
-                }
-                out.push(format!("{}body", inner_pad));
-                self.emit_expr_into(body, indent + 2, out)?;
+               
+                Value::Var(res)
             }
         }
-        Ok(())
-    }
-
-    fn inline_expr(&self, expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Number(n) => Some(format!("literal {}", n)),
-            Expr::String(s) => Some(format!("literal \"{}\"", s)),
-            Expr::Variable(name) => Some(format!("var {}", name)),
-            Expr::Call { name, args } => Some(self.render_call_line("", name, args)),
-            _ => None,
-        }
-    }
-
-    fn render_call_line(&self, pad: &str, name: &str, args: &[Expr]) -> String {
-        let mut line = String::new();
-        line.push_str(pad);
-        line.push_str("call ");
-        line.push_str(name);
-        if !args.is_empty() {
-            line.push_str(" args [");
-            for (i, arg) in args.iter().enumerate() {
-                if i > 0 {
-                    line.push_str(", ");
-                }
-                line.push_str(&self.render_call_arg(arg));
-            }
-            line.push(']');
-        }
-        line
-    }
-
-    fn render_call_arg(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::Number(n) => n.to_string(),
-            Expr::String(s) => format!("literal \"{}\"", s),
-            Expr::Variable(name) => format!("var {}", name),
-            _ => self
-                .inline_expr(expr)
-                .unwrap_or_else(|| format!("EXPR({:?})", expr)),
-        }
-    }
-
-    /// 収集したモジュールテキストをファイルに書き出します
-    #[allow(dead_code)]
-    pub fn write_module_to(&self, path: &Path) -> Result<()> {
-        let mut f = File::create(path)?;
-        f.write_all(self.module().as_bytes())?;
-        Ok(())
-    }
-
-    /// IR-only モードでは run_function_by_name はサポートされていません
-    pub fn run_function_by_name(&mut self, _name: &str) -> Result<f64> {
-        Err(anyhow!(
-            "run_function_by_name は IR バックエンドではサポートされていません"
-        ))
     }
 }
