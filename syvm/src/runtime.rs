@@ -1,53 +1,88 @@
 use crate::bytecode::*;
 use crate::actor::{Actor, Message};
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+
+use std::sync::{Arc, RwLock};
 
 pub struct Runtime {
-    senders: HashMap<String, mpsc::Sender<Message>>,
+    actors: HashMap<String, IrActor>,
+    // Shared router for actor lookups
+    router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
+    // Thread handles for joining
+    handles: Vec<JoinHandle<()>>,
 }
 
 impl Runtime {
-    pub fn new() -> Self {
+    pub fn new(program: IrProgram) -> Self {
+        let mut actors = HashMap::new();
+        for actor in program.actors {
+            actors.insert(actor.name.clone(), actor);
+        }
         Runtime {
-            senders: HashMap::new(),
+            actors,
+            router: Arc::new(RwLock::new(HashMap::new())),
+            handles: Vec::new(),
+        }
+    }
+
+    pub fn spawn_all(&mut self) {
+        // Collect all actor names first to avoid borrow checker issues
+        let actor_names: Vec<String> = self.actors.keys().cloned().collect();
+        
+        for name in actor_names {
+            if let Some(def) = self.actors.get(&name) {
+                self.spawn(def.clone(), HashMap::new());
+            }
         }
     }
 
     pub fn spawn(&mut self, definition: IrActor, initial_state: HashMap<String, Value>) {
-        let (tx, rx) = mpsc::channel(32);
+        let (tx, rx) = mpsc::channel();
         let name = definition.name.clone();
-        self.senders.insert(name.clone(), tx);
+        
+        {
+            let mut router = self.router.write().unwrap();
+            router.insert(name.clone(), tx);
+        }
 
-        let mut actor = Actor::new(definition, rx);
+        let router_clone = self.router.clone();
+        let mut actor = Actor::new(definition, rx, router_clone);
         actor.state = initial_state;
 
-        // Spawn on blocking thread pool for true parallelism
-        tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async move {
-                actor.run().await;
-            });
+        // Spawn on OS thread and save the handle
+        let handle = std::thread::spawn(move || {
+            actor.run();
         });
+        
+        self.handles.push(handle);
     }
 
-    pub fn spawn_all(&mut self, actors: Vec<IrActor>, state_fn: impl Fn(&str) -> HashMap<String, Value>) {
-        for actor_def in actors {
-            let name = actor_def.name.clone();
-            let initial_state = state_fn(&name);
-            self.spawn(actor_def, initial_state);
+    pub fn send(&self, target: &str, msg: Message) {
+        let router = self.router.read().unwrap();
+        if let Some(tx) = router.get(target) {
+            // Unbounded send is non-blocking
+            let _ = tx.send(msg);
+        } else {
+            println!("Runtime: Actor {} not found", target);
         }
     }
 
-    pub async fn send(&self, target: &str, msg: Message) {
-        if let Some(tx) = self.senders.get(target) {
-            tx.send(msg).await.unwrap();
-        } else {
-            println!("Runtime: Target actor {} not found", target);
+    pub fn shutdown(&mut self) {
+        // Clear the router to close all channels, causing actors to exit their loops
+        let mut router = self.router.write().unwrap();
+        router.clear();
+    }
+
+    pub fn wait_for_completion(&mut self) {
+        // Join all actor threads
+        while let Some(handle) = self.handles.pop() {
+            let _ = handle.join();
         }
     }
 
     pub fn actor_count(&self) -> usize {
-        self.senders.len()
+        self.router.read().unwrap().len()
     }
 }

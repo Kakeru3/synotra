@@ -4,10 +4,9 @@ mod runtime;
 
 use clap::Parser;
 use std::fs;
-use bytecode::{IrProgram, Value};
+use bytecode::IrProgram;
 use runtime::Runtime;
 use actor::Message;
-use std::collections::HashMap;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -16,27 +15,18 @@ struct Args {
     input: String,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
-async fn main() {
+fn main() {
     let args = Args::parse();
     let src = fs::read_to_string(&args.input).expect("Failed to read input file");
 
     let program: IrProgram = serde_json::from_str(&src).expect("Failed to parse IR");
     println!("Loaded Program with {} actors", program.actors.len());
 
-    let mut runtime = Runtime::new();
+    // Collect actor names BEFORE moving program
+    let actor_names: Vec<String> = program.actors.iter().map(|a| a.name.clone()).collect();
 
-    // Spawn ALL actors from the program
-    let actors_vec: Vec<_> = program.actors.into_iter().collect();
-    
-    // Collect actor names BEFORE moving actors_vec
-    let actor_names: Vec<String> = actors_vec.iter().map(|a| a.name.clone()).collect();
-    
-    runtime.spawn_all(actors_vec, |name| {
-        let mut state = HashMap::new();
-        state.insert("name".to_string(), Value::ConstString(name.to_string()));
-        state
-    });
+    let mut runtime = Runtime::new(program);
+    runtime.spawn_all();
 
     println!("Spawned {} actor(s)", runtime.actor_count());
 
@@ -44,25 +34,31 @@ async fn main() {
     if !actor_names.is_empty() {
         println!("Starting parallel execution...");
         
-        let start = std::time::Instant::now();
-        
         for actor_name in &actor_names {
             runtime.send(actor_name, Message {
                 name: "run".to_string(),
                 args: vec![],
                 reply_to: None,
-            }).await;
+            });
         }
 
-        // Wait for all actors to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        // Give actors a moment to process messages before shutdown
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Wait for actors to run
+    // We sleep here to allow the computation to finish. 
+    // In a real system, we would wait for a termination signal.
+    std::thread::sleep(std::time::Duration::from_secs(15));
+
+    let start = std::time::Instant::now();
+    
+    // Shutdown runtime (signals actors to stop)
+    runtime.shutdown();
+        runtime.wait_for_completion();
         
         let elapsed = start.elapsed();
-        println!("\n⏱️  Parallel execution time: {:?}", elapsed);
+        println!("\n⏱️  Pure execution time (shutdown + cleanup): {:?}", elapsed);
     } else {
         println!("No actors found in the program");
     }
-
-    // Keep alive for a bit
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 }

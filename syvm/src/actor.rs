@@ -1,11 +1,12 @@
 use crate::bytecode::*;
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 pub struct Actor {
     pub definition: IrActor,
     pub mailbox: mpsc::Receiver<Message>,
     pub state: HashMap<String, Value>, // Local variables (SW)
+    pub router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -17,41 +18,46 @@ pub struct Message {
 }
 
 impl Actor {
-    pub fn new(definition: IrActor, mailbox: mpsc::Receiver<Message>) -> Self {
+    pub fn new(definition: IrActor, mailbox: mpsc::Receiver<Message>, router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>) -> Self {
         Actor {
             definition,
             mailbox,
             state: HashMap::new(),
+            router,
         }
     }
 
-    pub async fn run(&mut self) {
+    pub fn run(&mut self) {
         println!("Actor {} started", self.definition.name);
-        while let Some(msg) = self.mailbox.recv().await {
+        while let Ok(msg) = self.mailbox.recv() {
             println!("Actor {} received message: {}", self.definition.name, msg.name);
-            self.handle_message(msg).await;
+            self.handle_message(msg);
         }
     }
 
-    async fn handle_message(&mut self, msg: Message) {
+    fn handle_message(&mut self, msg: Message) {
         // Find handler
         let handler = self.definition.handlers.iter().find(|h| h.name == msg.name).cloned();
         
         if let Some(handler) = handler {
-            self.execute_handler(&handler, msg.args).await;
+            self.execute_handler(&handler, msg.args, msg.reply_to);
         } else {
             println!("Handler {} not found in actor {}", msg.name, self.definition.name);
+            // If reply is expected, send default value
+            if let Some(reply_tx) = msg.reply_to {
+                let _ = reply_tx.send(Value::ConstInt(0));
+            }
         }
     }
 
-    async fn execute_handler(&mut self, handler: &IrHandler, args: Vec<Value>) {
+    fn execute_handler(&mut self, handler: &IrHandler, args: Vec<Value>, reply_to: Option<mpsc::Sender<Value>>) {
         let mut locals: HashMap<String, Value> = HashMap::new();
         
-        // HACK: Init args
-        if handler.name == "receive" || handler.name == "print" {
-             if let Some(arg) = args.get(0) {
-                 locals.insert("msg".to_string(), arg.clone());
-             }
+        // Bind arguments to parameters
+        for (i, (param_name, _)) in handler.params.iter().enumerate() {
+            if let Some(arg_val) = args.get(i) {
+                locals.insert(param_name.clone(), arg_val.clone());
+            }
         }
 
         let mut current_block_idx = 0;
@@ -74,7 +80,7 @@ impl Actor {
                         let res = self.eval_bin_op(op, l, r);
                         locals.insert(result.clone(), res);
                     }
-                    Instruction::CallPure { result, func, args } => {
+                    Instruction::CallPure { result, func: _, args: _ } => {
                          // ... existing pure calls if any ...
                     }
                     Instruction::CallIo { result, func, args } => {
@@ -88,12 +94,79 @@ impl Actor {
                             locals.insert(result.clone(), Value::ConstInt(0));
                         }
                     }
+                    Instruction::Send { target, msg, args } => {
+                        let target_val = self.resolve_value(target, &locals);
+                        let msg_val = self.resolve_value(msg, &locals);
+                        let arg_vals: Vec<Value> = args.iter().map(|a| self.resolve_value(a, &locals)).collect();
+                        
+                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) = (target_val, msg_val) {
+                            let router = self.router.read().unwrap();
+                            if let Some(tx) = router.get(&target_name) {
+                                let msg = Message {
+                                    name: msg_name, 
+                                    args: arg_vals, 
+                                    reply_to: None,
+                                };
+                                // Unbounded channel send is non-blocking, so we can do it synchronously
+                                if let Err(e) = tx.send(msg) {
+                                    eprintln!("Runtime Error: Failed to send message to {}: {}", target_name, e);
+                                }
+                            } else {
+                                println!("Runtime: Actor {} not found", target_name);
+                            }
+                        }
+                    }
+                    Instruction::Ask { result, target, msg, args } => {
+                        let target_val = self.resolve_value(target, &locals);
+                        let msg_val = self.resolve_value(msg, &locals);
+                        let arg_vals: Vec<Value> = args.iter().map(|a| self.resolve_value(a, &locals)).collect();
+                        
+                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) = (target_val, msg_val) {
+                            let router = self.router.read().unwrap();
+                            if let Some(tx) = router.get(&target_name) {
+                                // Create one-shot channel for reply
+                                let (reply_tx, reply_rx) = mpsc::channel();
+                                
+                                let msg = Message {
+                                    name: msg_name.clone(), 
+                                    args: arg_vals, 
+                                    reply_to: Some(reply_tx),
+                                };
+                                
+                                // Send message
+                                if let Err(e) = tx.send(msg) {
+                                    eprintln!("Runtime Error: Failed to send ask to {}: {}", target_name, e);
+                                    locals.insert(result.clone(), Value::ConstInt(0));
+                                } else {
+                                    // Async: Return Future immediately
+                                    let future = Value::Future(RuntimeFuture(Arc::new(Mutex::new(FutureState::Pending(reply_rx)))));
+                                    locals.insert(result.clone(), future);
+                                }
+                            } else {
+                                println!("Runtime: Actor {} not found", target_name);
+                                locals.insert(result.clone(), Value::ConstInt(0));
+                            }
+                        } else {
+                            locals.insert(result.clone(), Value::ConstInt(0));
+                        }
+                    }
                     _ => {}
                 }
             }
             
             match &block.terminator {
-                Terminator::Return(_) => break,
+                Terminator::Return(val_opt) => {
+                    // If there's a reply_to channel, send the return value
+                    if let Some(reply_tx) = reply_to {
+                        let return_val = if let Some(val) = val_opt {
+                            self.resolve_value(val, &locals)
+                        } else {
+                            Value::ConstInt(0) // Default return value
+                        };
+                        let _ = reply_tx.send(return_val);
+                    }
+                    break;
+                }
                 Terminator::Jump(target) => {
                     current_block_idx = *target;
                 }
@@ -128,15 +201,30 @@ impl Actor {
 
     fn resolve_value(&self, val: &Value, locals: &HashMap<String, Value>) -> Value {
         match val {
-            Value::ConstInt(_) | Value::ConstString(_) => val.clone(),
+            Value::ConstInt(i) => Value::ConstInt(*i),
+            Value::ConstString(s) => Value::ConstString(s.clone()),
             Value::Var(name) => {
                 if let Some(v) = locals.get(name) {
-                    v.clone()
+                    self.resolve_value(v, locals)
                 } else if let Some(v) = self.state.get(name) {
-                    v.clone()
+                    self.resolve_value(v, locals)
                 } else {
                     Value::ConstString(format!("Undefined({})", name))
                 }
+            }
+            Value::Future(rt_future) => {
+                let mut state = rt_future.0.lock().unwrap();
+                let val = match &*state {
+                    FutureState::Resolved(v) => *v.clone(),
+                    FutureState::Pending(rx) => {
+                        match rx.recv() {
+                            Ok(v) => v,
+                            Err(_) => Value::ConstInt(0),
+                        }
+                    }
+                };
+                *state = FutureState::Resolved(Box::new(val.clone()));
+                val
             }
         }
     }
