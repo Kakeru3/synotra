@@ -53,12 +53,14 @@ impl Actor {
     }
 
     fn execute_handler(&mut self, handler: &IrHandler, args: Vec<Value>, reply_to: Option<mpsc::Sender<Value>>) {
-        let mut locals: HashMap<String, Value> = HashMap::new();
+        // Initialize locals with default values (0)
+        let mut locals: Vec<Value> = vec![Value::ConstInt(0); handler.local_count];
         
         // Bind arguments to parameters
-        for (i, (param_name, _)) in handler.params.iter().enumerate() {
+        // Params are mapped to the first N locals
+        for (i, _) in handler.params.iter().enumerate() {
             if let Some(arg_val) = args.get(i) {
-                locals.insert(param_name.clone(), arg_val.clone());
+                locals[i] = arg_val.clone();
             }
         }
 
@@ -72,18 +74,21 @@ impl Actor {
             
             for instr in &block.instrs {
                 match instr {
-                    Instruction::Assign(var, val) => {
-                        let v = self.resolve_value(val, &locals);
-                        locals.insert(var.clone(), v);
+                    Instruction::Assign(idx, val) => {
+                        // Store value as-is, never resolve here
+                        // Resolution happens lazily in resolve_value when value is actually needed
+                        locals[*idx] = val.clone();
                     }
                     Instruction::BinOp { result, op, lhs, rhs } => {
                         let l = self.resolve_value(lhs, &locals);
                         let r = self.resolve_value(rhs, &locals);
                         let res = self.eval_bin_op(op, l, r);
-                        locals.insert(result.clone(), res);
+                        locals[*result] = res;
                     }
                     Instruction::CallPure { result, func: _, args: _ } => {
                          // ... existing pure calls if any ...
+                         // Still unimplemented, but result is now an index
+                         locals[*result] = Value::ConstInt(0);
                     }
                     Instruction::CallIo { result, func, args } => {
                         if func == "print" {
@@ -93,7 +98,7 @@ impl Actor {
                             } else if let Value::ConstInt(i) = val {
                                 println!(">> SYNOTRA IO: {}", i);
                             }
-                            locals.insert(result.clone(), Value::ConstInt(0));
+                            locals[*result] = Value::ConstInt(0);
                         }
                     }
                     Instruction::Send { target, msg, args } => {
@@ -138,18 +143,18 @@ impl Actor {
                                 // Send message
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!("Runtime Error: Failed to send ask to {}: {}", target_name, e);
-                                    locals.insert(result.clone(), Value::ConstInt(0));
+                                    locals[*result] = Value::ConstInt(0);
                                 } else {
                                     // Async: Return Future immediately
                                     let future = Value::Future(RuntimeFuture(Arc::new(Mutex::new(FutureState::Pending(reply_rx)))));
-                                    locals.insert(result.clone(), future);
+                                    locals[*result] = future;
                                 }
                             } else {
                                 println!("Runtime: Actor {} not found", target_name);
-                                locals.insert(result.clone(), Value::ConstInt(0));
+                                locals[*result] = Value::ConstInt(0);
                             }
                         } else {
-                            locals.insert(result.clone(), Value::ConstInt(0));
+                            locals[*result] = Value::ConstInt(0);
                         }
                     }
                     Instruction::Exit => {
@@ -205,17 +210,15 @@ impl Actor {
         }
     }
 
-    fn resolve_value(&self, val: &Value, locals: &HashMap<String, Value>) -> Value {
+    fn resolve_value(&self, val: &Value, locals: &Vec<Value>) -> Value {
         match val {
             Value::ConstInt(i) => Value::ConstInt(*i),
             Value::ConstString(s) => Value::ConstString(s.clone()),
-            Value::Var(name) => {
-                if let Some(v) = locals.get(name) {
-                    self.resolve_value(v, locals)
-                } else if let Some(v) = self.state.get(name) {
+            Value::Local(idx) => {
+                if let Some(v) = locals.get(*idx) {
                     self.resolve_value(v, locals)
                 } else {
-                    Value::ConstString(format!("Undefined({})", name))
+                    Value::ConstInt(0) // Should not happen if compiled correctly
                 }
             }
             Value::Future(rt_future) => {

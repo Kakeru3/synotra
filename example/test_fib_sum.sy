@@ -1,0 +1,17 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var a = 9227465
+        var b = 14930352
+        var c = 24157817
+        var d = 39088169
+        var e = 63245986
+        var f = 102334155
+        var total = a + b + c + d + e + f
+        print("Total: ")
+        print(total)
+    }
+}

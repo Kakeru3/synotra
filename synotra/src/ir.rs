@@ -14,7 +14,8 @@ pub struct IrActor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrHandler {
     pub name: String,
-    pub params: Vec<(String, String)>,
+    pub params: Vec<(String, String)>, // Name, Type
+    pub local_count: usize, // Number of local variables
     pub blocks: Vec<BasicBlock>,
 }
 
@@ -27,26 +28,34 @@ pub struct BasicBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
-    // SSA
-    Assign(String, Value), // v1 = ...
-    BinOp { result: String, op: String, lhs: Value, rhs: Value },
-    
-    // Actor Ops
-    Send { target: Value, msg: Value, args: Vec<Value> },
-    Ask { result: String, target: Value, msg: Value, args: Vec<Value> }, // v1 = ASK ...
-    
-    // State Ops
-    SwLoad { result: String, var: String },
-    SwStore { var: String, val: Value },
-    
-    // IO/Pure Calls
-    CallPure { result: String, func: String, args: Vec<Value> },
-    CallIo { result: String, func: String, args: Vec<Value> },
-    
-    // File Ops (Primitive IO)
-    FileOp { op: String, args: Vec<Value> },
-    
-    // System Ops
+    Assign(usize, Value), // Local index, Value
+    BinOp {
+        result: usize, // Local index
+        op: String,
+        lhs: Value,
+        rhs: Value,
+    },
+    CallPure {
+        result: usize, // Local index
+        func: String,
+        args: Vec<Value>,
+    },
+    CallIo {
+        result: usize, // Local index
+        func: String,
+        args: Vec<Value>,
+    },
+    Send {
+        target: Value,
+        msg: Value,
+        args: Vec<Value>,
+    },
+    Ask {
+        result: usize, // Local index
+        target: Value,
+        msg: Value,
+        args: Vec<Value>,
+    },
     Exit,
 }
 
@@ -54,12 +63,12 @@ pub enum Instruction {
 pub enum Terminator {
     Return(Option<Value>),
     Jump(usize),
-    JumpCond(Value, usize, usize), // cond, true_block, false_block
+    JumpCond(Value, usize, usize),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     ConstInt(i64),
     ConstString(String),
-    Var(String), // SSA variable or Local
+    Local(usize), // Local variable index
 }

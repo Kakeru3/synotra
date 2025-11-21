@@ -1,0 +1,13 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var a = 10
+        var b = 20
+        var c = a + b
+        print("Result: ")
+        print(c)
+    }
+}

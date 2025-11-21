@@ -3,11 +3,13 @@ use crate::ir::*;
 use crate::ast::BinaryOp;
 use crate::ir::Terminator;
 use crate::ir::Instruction;
+use std::collections::HashMap;
 
 pub struct Codegen {
     blocks: Vec<BasicBlock>,
     current_block_idx: usize,
-    var_counter: usize,
+    locals_map: HashMap<String, usize>,
+    next_local_id: usize,
     current_actor: String,
 }
 
@@ -16,14 +18,27 @@ impl Codegen {
         Codegen {
             blocks: Vec::new(),
             current_block_idx: 0,
-            var_counter: 0,
+            locals_map: HashMap::new(),
+            next_local_id: 0,
             current_actor: actor_name,
         }
     }
 
-    fn new_var(&mut self) -> String {
-        self.var_counter += 1;
-        format!("v{}", self.var_counter)
+    fn get_or_alloc_local(&mut self, name: &str) -> usize {
+        if let Some(&id) = self.locals_map.get(name) {
+            id
+        } else {
+            let id = self.next_local_id;
+            self.locals_map.insert(name.to_string(), id);
+            self.next_local_id += 1;
+            id
+        }
+    }
+
+    fn alloc_temp(&mut self) -> usize {
+        let id = self.next_local_id;
+        self.next_local_id += 1;
+        id
     }
 
     fn new_block(&mut self) {
@@ -55,6 +70,11 @@ impl Codegen {
     }
 
     pub fn generate(mut self, func: &FunctionDef) -> IrHandler {
+        // Register params as locals first
+        for p in &func.params {
+            self.get_or_alloc_local(&p.name);
+        }
+
         // Create entry block
         self.new_block();
         
@@ -76,6 +96,7 @@ impl Codegen {
         IrHandler {
             name: func.name.clone(),
             params: func.params.iter().map(|p| (p.name.clone(), format!("{:?}", p.ty))).collect(),
+            local_count: self.next_local_id,
             blocks: self.blocks.clone(),
         }
     }
@@ -84,15 +105,18 @@ impl Codegen {
         match stmt {
             Stmt::Let(name, _, expr) => {
                 let val = self.gen_expr(expr);
-                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
+                let idx = self.get_or_alloc_local(name);
+                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
             }
             Stmt::Var(name, _, expr) => {
                 let val = self.gen_expr(expr);
-                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
+                let idx = self.get_or_alloc_local(name);
+                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
             }
             Stmt::Assign(name, expr) => {
                 let val = self.gen_expr(expr);
-                self.current_block_mut().instrs.push(Instruction::Assign(name.clone(), val));
+                let idx = self.get_or_alloc_local(name);
+                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
             }
             Stmt::Expr(expr) => {
                 self.gen_expr(expr);
@@ -184,7 +208,8 @@ impl Codegen {
 
                 // Init
                 let start_val = self.gen_expr(start);
-                self.current_block_mut().instrs.push(Instruction::Assign(iter.clone(), start_val));
+                let iter_idx = self.get_or_alloc_local(iter);
+                self.current_block_mut().instrs.push(Instruction::Assign(iter_idx, start_val));
 
                 let header_idx = self.new_block_index();
                 let body_idx = self.new_block_index();
@@ -194,20 +219,20 @@ impl Codegen {
 
                 // Header: iter < end
                 self.switch_to_block(header_idx);
-                let end_val = self.gen_expr(end); // Re-eval end? Or eval once? Assuming eval once for now implies we should store it.
+                let end_val = self.gen_expr(end); 
                 // For simplicity re-eval end expression (might be side-effecty, but usually const/var).
                 // Better: var _end = end;
                 // Let's stick to simple re-eval or assume it's a var/const for now.
 
-                let iter_val = Value::Var(iter.clone());
-                let cond_res = self.new_var();
+                let iter_val = Value::Local(iter_idx);
+                let cond_res = self.alloc_temp();
                 self.current_block_mut().instrs.push(Instruction::BinOp {
-                    result: cond_res.clone(),
+                    result: cond_res,
                     op: "lt".to_string(),
                     lhs: iter_val.clone(),
                     rhs: end_val
                 });
-                self.current_block_mut().terminator = Terminator::JumpCond(Value::Var(cond_res), body_idx, exit_idx);
+                self.current_block_mut().terminator = Terminator::JumpCond(Value::Local(cond_res), body_idx, exit_idx);
 
                 // Body
                 self.switch_to_block(body_idx);
@@ -216,14 +241,14 @@ impl Codegen {
                 }
 
                 // Increment
-                let inc_res = self.new_var();
+                let inc_res = self.alloc_temp();
                 self.current_block_mut().instrs.push(Instruction::BinOp {
-                    result: inc_res.clone(),
+                    result: inc_res,
                     op: "add".to_string(),
-                    lhs: Value::Var(iter.clone()),
+                    lhs: Value::Local(iter_idx),
                     rhs: Value::ConstInt(1),
                 });
-                self.current_block_mut().instrs.push(Instruction::Assign(iter.clone(), Value::Var(inc_res)));
+                self.current_block_mut().instrs.push(Instruction::Assign(iter_idx, Value::Local(inc_res)));
 
                 self.current_block_mut().terminator = Terminator::Jump(header_idx);
 
@@ -241,11 +266,14 @@ impl Codegen {
                 Literal::String(s) => Value::ConstString(s.clone()),
                 Literal::Bool(b) => Value::ConstInt(if *b { 1 } else { 0 }), // Bool as int
             },
-            Expr::Variable(name) => Value::Var(name.clone()),
+            Expr::Variable(name) => {
+                let idx = self.get_or_alloc_local(name);
+                Value::Local(idx)
+            },
             Expr::BinaryOp(lhs, op, rhs) => {
                 let l = self.gen_expr(lhs);
                 let r = self.gen_expr(rhs);
-                let res = self.new_var();
+                let res = self.alloc_temp();
 
                 let op_str = match op {
                     BinaryOp::Add => "add",
@@ -261,23 +289,23 @@ impl Codegen {
                 };
 
                 self.current_block_mut().instrs.push(Instruction::BinOp {
-                    result: res.clone(),
+                    result: res,
                     op: op_str.to_string(),
                     lhs: l,
                     rhs: r,
                 });
-                Value::Var(res)
+                Value::Local(res)
             }
             Expr::Call(target, method, args) => {
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
-                let res = self.new_var();
+                let res = self.alloc_temp();
                 
                 // Check if IO or Pure (simplified)
                 // In real impl, we check symbol table. Assuming Pure for now unless "print"
                 let func_name = method.clone();
                 if func_name == "print" {
                      self.current_block_mut().instrs.push(Instruction::CallIo {
-                        result: res.clone(),
+                        result: res,
                         func: func_name,
                         args: arg_vals,
                     });
@@ -287,28 +315,28 @@ impl Codegen {
                     // In a real compiler we'd handle this better (e.g. bottom type)
                 } else {
                      self.current_block_mut().instrs.push(Instruction::CallPure {
-                        result: res.clone(),
+                        result: res,
                         func: func_name,
                         args: arg_vals,
                     });
                 }
                
-                Value::Var(res)
+                Value::Local(res)
             }
             Expr::Ask { target, message, args } => {
                 let target_val = self.gen_expr(target);
                 let msg_val = self.gen_expr(message);
                 let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
-                let res = self.new_var();
+                let res = self.alloc_temp();
                 
                 self.current_block_mut().instrs.push(Instruction::Ask {
-                    result: res.clone(),
+                    result: res,
                     target: target_val,
                     msg: msg_val,
                     args: arg_vals,
                 });
                 
-                Value::Var(res)
+                Value::Local(res)
             }
         }
     }

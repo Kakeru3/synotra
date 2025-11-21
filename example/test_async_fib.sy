@@ -1,0 +1,27 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var result = ask("Worker1", "calc_fib", 35)
+        print("Result: ")
+        print(result)
+    }
+}
+
+actor Worker1(name: String) {
+    io fun run(msg: Start) { }
+    io fun calc_fib(n: Int) {
+        var a = 0
+        var b = 1
+        var i = 0
+        while (i < n) {
+            var temp = a + b
+            a = b
+            b = temp
+            i = i + 1
+        }
+        return a
+    }
+}
