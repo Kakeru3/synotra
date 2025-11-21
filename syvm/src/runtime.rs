@@ -12,6 +12,9 @@ pub struct Runtime {
     router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
     // Thread handles for joining
     handles: Vec<JoinHandle<()>>,
+    // Shutdown signaling
+    shutdown_tx: mpsc::Sender<()>,
+    shutdown_rx: mpsc::Receiver<()>,
 }
 
 impl Runtime {
@@ -20,10 +23,13 @@ impl Runtime {
         for actor in program.actors {
             actors.insert(actor.name.clone(), actor);
         }
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
         Runtime {
             actors,
             router: Arc::new(RwLock::new(HashMap::new())),
             handles: Vec::new(),
+            shutdown_tx,
+            shutdown_rx,
         }
     }
 
@@ -48,7 +54,8 @@ impl Runtime {
         }
 
         let router_clone = self.router.clone();
-        let mut actor = Actor::new(definition, rx, router_clone);
+        let shutdown_signal = self.shutdown_tx.clone();
+        let mut actor = Actor::new(definition, rx, router_clone, shutdown_signal);
         actor.state = initial_state;
 
         // Spawn on OS thread and save the handle
@@ -73,6 +80,11 @@ impl Runtime {
         // Clear the router to close all channels, causing actors to exit their loops
         let mut router = self.router.write().unwrap();
         router.clear();
+    }
+
+    pub fn wait_for_exit(&self) {
+        // Block until any actor calls exit()
+        let _ = self.shutdown_rx.recv();
     }
 
     pub fn wait_for_completion(&mut self) {

@@ -158,6 +158,14 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 analyze_expr(e, symbols, is_io_context)?;
             }
         }
+        Stmt::Send { target, message, args } => {
+            // TODO: Check if target is String and message is valid type
+            analyze_expr(target, symbols, is_io_context)?;
+            analyze_expr(message, symbols, is_io_context)?;
+            for arg in args {
+                analyze_expr(arg, symbols, is_io_context)?;
+            }
+        }
         Stmt::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
@@ -243,6 +251,14 @@ fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> 
             }
 
             Ok(Type::Int) 
+        }
+        Expr::Ask { target, message, args } => {
+            analyze_expr(target, symbols, is_io_context)?;
+            analyze_expr(message, symbols, is_io_context)?;
+            for arg in args {
+                analyze_expr(arg, symbols, is_io_context)?;
+            }
+            Ok(Type::Int) // ask returns a value
         }
     }
 }

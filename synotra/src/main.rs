@@ -45,7 +45,7 @@ fn main() {
                             let mut handlers = Vec::new();
                             for member in &actor_def.members {
                                 if let ActorMember::Method(func) = member {
-                                    let mut codegen = Codegen::new();
+                                    let mut codegen = Codegen::new(actor_def.name.clone());
                                     let handler = codegen.generate(func);
                                     handlers.push(handler);
                                 }

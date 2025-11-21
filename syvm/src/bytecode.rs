@@ -45,6 +45,9 @@ pub enum Instruction {
     
     // File Ops (Primitive IO)
     FileOp { op: String, args: Vec<Value> },
+    
+    // System Ops
+    Exit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -30,35 +30,29 @@ fn main() {
 
     println!("Spawned {} actor(s)", runtime.actor_count());
 
-    // Send "run" message to ALL actors for parallel execution
-    if !actor_names.is_empty() {
-        println!("Starting parallel execution...");
+    // Send "run" message ONLY to "main" actor
+    if actor_names.contains(&"main".to_string()) {
+        println!("Starting execution from 'main' actor...");
         
-        for actor_name in &actor_names {
-            runtime.send(actor_name, Message {
-                name: "run".to_string(),
-                args: vec![],
-                reply_to: None,
-            });
-        }
+        let start = std::time::Instant::now();
 
-        // Give actors a moment to process messages before shutdown
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        runtime.send("main", Message {
+            name: "run".to_string(),
+            args: vec![],
+            reply_to: None,
+        });
 
-        // Wait for actors to run
-    // We sleep here to allow the computation to finish. 
-    // In a real system, we would wait for a termination signal.
-    std::thread::sleep(std::time::Duration::from_secs(15));
-
-    let start = std::time::Instant::now();
+        // Wait for explicit exit signal
+        runtime.wait_for_exit();
+        
+        let elapsed = start.elapsed();
+        println!("\n⏱️  Total execution time: {:?}", elapsed);
+    } else {
+        println!("Error: 'main' actor not found. Execution requires a 'main' actor.");
+        return;
+    }
     
     // Shutdown runtime (signals actors to stop)
     runtime.shutdown();
-        runtime.wait_for_completion();
-        
-        let elapsed = start.elapsed();
-        println!("\n⏱️  Pure execution time (shutdown + cleanup): {:?}", elapsed);
-    } else {
-        println!("No actors found in the program");
-    }
+    runtime.wait_for_completion();
 }

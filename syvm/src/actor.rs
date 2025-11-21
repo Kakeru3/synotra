@@ -7,6 +7,7 @@ pub struct Actor {
     pub mailbox: mpsc::Receiver<Message>,
     pub state: HashMap<String, Value>, // Local variables (SW)
     pub router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
+    pub shutdown_signal: mpsc::Sender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -18,12 +19,13 @@ pub struct Message {
 }
 
 impl Actor {
-    pub fn new(definition: IrActor, mailbox: mpsc::Receiver<Message>, router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>) -> Self {
+    pub fn new(definition: IrActor, mailbox: mpsc::Receiver<Message>, router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>, shutdown_signal: mpsc::Sender<()>) -> Self {
         Actor {
             definition,
             mailbox,
             state: HashMap::new(),
             router,
+            shutdown_signal,
         }
     }
 
@@ -149,6 +151,10 @@ impl Actor {
                         } else {
                             locals.insert(result.clone(), Value::ConstInt(0));
                         }
+                    }
+                    Instruction::Exit => {
+                        // Signal shutdown
+                        let _ = self.shutdown_signal.send(());
                     }
                     _ => {}
                 }

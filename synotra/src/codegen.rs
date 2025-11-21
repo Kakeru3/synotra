@@ -8,14 +8,16 @@ pub struct Codegen {
     blocks: Vec<BasicBlock>,
     current_block_idx: usize,
     var_counter: usize,
+    current_actor: String,
 }
 
 impl Codegen {
-    pub fn new() -> Self {
+    pub fn new(actor_name: String) -> Self {
         Codegen {
             blocks: Vec::new(),
             current_block_idx: 0,
             var_counter: 0,
+            current_actor: actor_name,
         }
     }
 
@@ -62,12 +64,19 @@ impl Codegen {
         
         // Ensure terminator
         if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+            // If this is the 'run' handler of the 'main' actor, append an Exit instruction
+            // This allows the user to omit explicit exit() calls
+            if self.current_actor == "main" && func.name == "run" {
+                self.current_block_mut().instrs.push(Instruction::Exit);
+            }
+            
             self.current_block_mut().terminator = Terminator::Return(None);
         }
 
         IrHandler {
             name: func.name.clone(),
-            blocks: self.blocks.drain(..).collect(),
+            params: func.params.iter().map(|p| (p.name.clone(), format!("{:?}", p.ty))).collect(),
+            blocks: self.blocks.clone(),
         }
     }
 
@@ -98,6 +107,16 @@ impl Codegen {
                 // Unreachable code after return, but we need to keep pushing to a valid block
                 // Create a dead block to catch subsequent instructions
                 self.new_block();
+            }
+            Stmt::Send { target, message, args } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
+                self.current_block_mut().instrs.push(Instruction::Send {
+                    target: target_val,
+                    msg: msg_val,
+                    args: arg_vals,
+                });
             }
             Stmt::If(cond, then_block, else_block) => {
                 let cond_val = self.gen_expr(cond);
@@ -262,6 +281,10 @@ impl Codegen {
                         func: func_name,
                         args: arg_vals,
                     });
+                } else if func_name == "exit" {
+                    self.current_block_mut().instrs.push(Instruction::Exit);
+                    // Exit doesn't return, but we need a value for the expression
+                    // In a real compiler we'd handle this better (e.g. bottom type)
                 } else {
                      self.current_block_mut().instrs.push(Instruction::CallPure {
                         result: res.clone(),
@@ -270,6 +293,21 @@ impl Codegen {
                     });
                 }
                
+                Value::Var(res)
+            }
+            Expr::Ask { target, message, args } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
+                let res = self.new_var();
+                
+                self.current_block_mut().instrs.push(Instruction::Ask {
+                    result: res.clone(),
+                    target: target_val,
+                    msg: msg_val,
+                    args: arg_vals,
+                });
+                
                 Value::Var(res)
             }
         }

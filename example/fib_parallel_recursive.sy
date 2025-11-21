@@ -1,0 +1,203 @@
+// Parallel Recursive Fibonacci
+// Distributes fib(35-40) x 1000 iterations across 6 workers in parallel
+
+class Start()
+class Fib()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+    
+    io fun run(msg: Start) {
+        print("=== PARALLEL RECURSIVE FIBONACCI ===")
+        print("Computing fib(35-40) x 100000 iterations in parallel across 6 workers")
+        
+        // Ask 6 workers to compute fib values 10000 times in parallel
+        var f35 = ask("Worker1", "Fib", 35)
+        var f36 = ask("Worker2", "Fib", 36)
+        var f37 = ask("Worker3", "Fib", 37)
+        var f38 = ask("Worker4", "Fib", 38)
+        var f39 = ask("Worker5", "Fib", 39)
+        var f40 = ask("Worker6", "Fib", 40)
+        
+        var sum = f35 + f36 + f37 + f38 + f39 + f40
+        
+        print("Results:")
+        print(f35)
+        print(f36)
+        print(f37)
+        print(f38)
+        print(f39)
+        print(f40)
+        print("Sum of all results:")
+        print(sum)
+        print("=== PARALLEL COMPLETE ===")
+    }
+}
+
+actor Worker1(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker1: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 1000000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}
+
+actor Worker2(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker2: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 100000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}
+
+actor Worker3(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker3: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 100000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}
+
+actor Worker4(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker4: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 100000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}
+
+actor Worker5(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker5: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 100000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}
+
+actor Worker6(name: String) {
+    io fun print(msg: String) { }
+    io fun run(msg: Start) { print("Worker6: Ready") }
+    
+    io fun Fib(n: Int) {
+        var result = 0
+        var count = 0
+        while (count < 100000) {
+            if (n < 2) {
+                result = n
+            } else {
+                var a = 0
+                var b = 1
+                var i = 2
+                while (i <= n) {
+                    var temp = a + b
+                    a = b
+                    b = temp
+                    i = i + 1
+                }
+                result = b
+            }
+            count = count + 1
+        }
+        return result
+    }
+}

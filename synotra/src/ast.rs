@@ -81,6 +81,7 @@ pub enum Stmt {
     Assign(String, Expr), // variable reassignment
     Expr(Expr),
     Return(Option<Expr>),
+    Send { target: Expr, message: Expr, args: Vec<Expr> },
     If(Expr, Block, Option<Block>),
     While(Expr, Block),
     For(String, Expr, Expr, Block), // iterator, start, end, body
@@ -92,6 +93,7 @@ pub enum Expr {
     Variable(String),
     Call(Box<Expr>, String, Vec<Expr>), // target.method(args) or func(args)
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
+    Ask { target: Box<Expr>, message: Box<Expr>, args: Vec<Expr> },
 }
 
 #[derive(Debug, Clone)]

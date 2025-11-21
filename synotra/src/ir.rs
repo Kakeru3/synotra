@@ -14,6 +14,7 @@ pub struct IrActor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrHandler {
     pub name: String,
+    pub params: Vec<(String, String)>,
     pub blocks: Vec<BasicBlock>,
 }
 
@@ -31,8 +32,8 @@ pub enum Instruction {
     BinOp { result: String, op: String, lhs: Value, rhs: Value },
     
     // Actor Ops
-    Send { target: Value, msg: Value },
-    Ask { result: String, target: Value, msg: Value }, // v1 = ASK ...
+    Send { target: Value, msg: Value, args: Vec<Value> },
+    Ask { result: String, target: Value, msg: Value, args: Vec<Value> }, // v1 = ASK ...
     
     // State Ops
     SwLoad { result: String, var: String },
@@ -44,6 +45,9 @@ pub enum Instruction {
     
     // File Ops (Primitive IO)
     FileOp { op: String, args: Vec<Value> },
+    
+    // System Ops
+    Exit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
