@@ -1,0 +1,28 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var result = ask("Worker1", "nested_loop", 3)
+        print("Result: ")
+        print(result)
+    }
+}
+
+actor Worker1(name: String) {
+    io fun run(msg: Start) { }
+    io fun nested_loop(n: Int) {
+        var outer = 0
+        var result = 0
+        while (outer < 2) {
+            var inner = 0
+            while (inner < n) {
+                result = result + 1
+                inner = inner + 1
+            }
+            outer = outer + 1
+        }
+        return result
+    }
+}

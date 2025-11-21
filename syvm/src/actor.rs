@@ -75,9 +75,27 @@ impl Actor {
             for instr in &block.instrs {
                 match instr {
                     Instruction::Assign(idx, val) => {
-                        // Store value as-is, never resolve here
-                        // Resolution happens lazily in resolve_value when value is actually needed
-                        locals[*idx] = val.clone();
+                        // Handle different assignment cases:
+                        // 1. Local(x) where locals[x] is Future -> copy Future as-is (async)
+                        // 2. Local(x) where locals[x] is value -> resolve to avoid aliasing
+                        // 3. Future -> copy Future as-is (async)
+                        // 4. Const -> resolve (no-op for constants)
+                        let v = match val {
+                            Value::Local(src_idx) => {
+                                if let Some(src_val) = locals.get(*src_idx) {
+                                    if matches!(src_val, Value::Future(_)) {
+                                        src_val.clone()  // Preserve Future for async
+                                    } else {
+                                        self.resolve_value(val, &locals)  // Resolve to avoid aliasing
+                                    }
+                                } else {
+                                    Value::ConstInt(0)
+                                }
+                            }
+                            Value::Future(_) => val.clone(),  // Direct Future assignment
+                            _ => self.resolve_value(val, &locals),  // Resolve constants/etc
+                        };
+                        locals[*idx] = v;
                     }
                     Instruction::BinOp { result, op, lhs, rhs } => {
                         let l = self.resolve_value(lhs, &locals);
@@ -216,7 +234,7 @@ impl Actor {
             Value::ConstString(s) => Value::ConstString(s.clone()),
             Value::Local(idx) => {
                 if let Some(v) = locals.get(*idx) {
-                    self.resolve_value(v, locals)
+                    self.resolve_value(v, locals)  // Always recursively resolve
                 } else {
                     Value::ConstInt(0) // Should not happen if compiled correctly
                 }

@@ -1,0 +1,25 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var result = ask("Worker1", "test_temp", 5)
+        print("Result: ")
+        print(result)
+    }
+}
+
+actor Worker1(name: String) {
+    io fun run(msg: Start) { }
+    io fun test_temp(n: Int) {
+        var a = 0
+        var i = 0
+        while (i < n) {
+            var temp = a + 1
+            a = temp
+            i = i + 1
+        }
+        return a
+    }
+}

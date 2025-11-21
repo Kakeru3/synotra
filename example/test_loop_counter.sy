@@ -1,0 +1,15 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        print("Testing loop counter:")
+        var i = 0
+        while (i < 5) {
+            print(i)
+            i = i + 1
+        }
+        print("Done")
+    }
+}

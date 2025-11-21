@@ -1,0 +1,23 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        var result = ask("Worker1", "simple_calc", 35)
+        print("Calc result: ")
+        print(result)
+    }
+}
+
+actor Worker1(name: String) {
+    io fun run(msg: Start) { }
+    io fun simple_calc(n: Int) {
+        var a = 0
+        var b = 1
+        var temp = a + b
+        a = b
+        b = temp
+        return a
+    }
+}
