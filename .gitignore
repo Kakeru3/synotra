@@ -6,7 +6,7 @@ Cargo.lock
 
 # Generated IR files
 *.syi
-example/test_*
+example/test_*.sy
 
 # IDE
 .vscode/
