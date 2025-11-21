@@ -5,7 +5,7 @@ use crate::lexer::Token;
 pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     let ident = select! { Token::Ident(ident) => ident };
     let int_lit = select! { Token::Int(i) => Literal::Int(i) };
-    let str_lit = select! { Token::String(s) => Literal::String(s) };
+    let str_lit = select! { Token::String(s) => s };
 
     let type_parser = ident.map(|s| match s.as_str() {
         "Int" => Type::Int,
@@ -37,7 +37,55 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         let atom = choice((
             ask_expr,
             int_lit.map(Expr::Literal),
-            str_lit.map(Expr::Literal),
+            str_lit.map(|s| {
+                // Parse interpolated string: "Hello ${name}!"
+                let mut parts = Vec::new();
+                let mut last_end = 0;
+                let mut chars: Vec<(usize, char)> = s.char_indices().collect();
+                let len = s.len();
+                
+                let mut i = 0;
+                while i < chars.len() {
+                    let (idx, c) = chars[i];
+                    if c == '$' && i + 1 < chars.len() && chars[i+1].1 == '{' {
+                        // Found start of interpolation
+                        if idx > last_end {
+                            parts.push(Expr::Literal(Literal::String(s[last_end..idx].to_string())));
+                        }
+                        
+                        // Find end of interpolation
+                        let start_var = i + 2;
+                        let mut end_var = start_var;
+                        while end_var < chars.len() && chars[end_var].1 != '}' {
+                            end_var += 1;
+                        }
+                        
+                        if end_var < chars.len() {
+                            let var_name_start = chars[start_var].0;
+                            let var_name_end = chars[end_var].0;
+                            let var_name = s[var_name_start..var_name_end].to_string();
+                            parts.push(Expr::Variable(var_name));
+                            last_end = chars[end_var].0 + 1; // Skip '}'
+                            i = end_var;
+                        }
+                    }
+                    i += 1;
+                }
+                
+                if last_end < len {
+                    parts.push(Expr::Literal(Literal::String(s[last_end..len].to_string())));
+                }
+                
+                if parts.is_empty() {
+                    Expr::Literal(Literal::String("".to_string()))
+                } else {
+                    let mut expr = parts[0].clone();
+                    for part in parts.into_iter().skip(1) {
+                        expr = Expr::BinaryOp(Box::new(expr), BinaryOp::Add, Box::new(part));
+                    }
+                    expr
+                }
+            }),
             ident.map(Expr::Variable),
             expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
         ));

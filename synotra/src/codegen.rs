@@ -303,7 +303,7 @@ impl Codegen {
                 // Check if IO or Pure (simplified)
                 // In real impl, we check symbol table. Assuming Pure for now unless "print"
                 let func_name = method.clone();
-                if func_name == "print" {
+                if func_name == "print" || func_name == "println" {
                      self.current_block_mut().instrs.push(Instruction::CallIo {
                         result: res,
                         func: func_name,

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex, Condvar};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Runtime {
     actors: HashMap<String, IrActor>,
@@ -15,6 +16,9 @@ pub struct Runtime {
     // Shutdown signaling
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
+    // Busy count for implicit termination
+    busy_count: Arc<AtomicUsize>,
+    completion_cond: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Runtime {
@@ -30,6 +34,8 @@ impl Runtime {
             handles: Vec::new(),
             shutdown_tx,
             shutdown_rx,
+            busy_count: Arc::new(AtomicUsize::new(0)),
+            completion_cond: Arc::new((Mutex::new(false), Condvar::new())),
         }
     }
 
@@ -55,7 +61,10 @@ impl Runtime {
 
         let router_clone = self.router.clone();
         let shutdown_signal = self.shutdown_tx.clone();
-        let mut actor = Actor::new(definition, rx, router_clone, shutdown_signal);
+        let busy_count = self.busy_count.clone();
+        let completion_cond = self.completion_cond.clone();
+        
+        let mut actor = Actor::new(definition, rx, router_clone, shutdown_signal, busy_count, completion_cond);
         actor.state = initial_state;
 
         // Spawn on OS thread and save the handle
@@ -69,6 +78,9 @@ impl Runtime {
     pub fn send(&self, target: &str, msg: Message) {
         let router = self.router.read().unwrap();
         if let Some(tx) = router.get(target) {
+            // Increment busy count
+            self.busy_count.fetch_add(1, Ordering::SeqCst);
+            
             // Unbounded send is non-blocking
             let _ = tx.send(msg);
         } else {
@@ -96,5 +108,13 @@ impl Runtime {
 
     pub fn actor_count(&self) -> usize {
         self.router.read().unwrap().len()
+    }
+
+    pub fn wait_for_idle(&self) {
+        let (lock, cvar) = &*self.completion_cond;
+        let mut finished = lock.lock().unwrap();
+        while !*finished {
+            finished = cvar.wait(finished).unwrap();
+        }
     }
 }

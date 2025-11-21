@@ -1,0 +1,16 @@
+class Start()
+
+actor main(name: String) {
+    // Pure関数（計算のみ、副作用なし）
+    fun pure_add(a: Int, b: Int): Int {
+        return a + b
+    }
+
+    // IO関数（副作用あり）
+    io fun run(msg: Start) {
+        // ✅ OK！IO関数内でPure関数を呼ぶ
+        var result = pure_add(10, 20)
+        print("Result: ")
+        print(result)
+    }   
+}

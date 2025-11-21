@@ -1,10 +1,8 @@
 class Start()
 
 actor main(name: String) {
-    io fun print(msg: String) { }
-
     io fun run(msg: Start) {
-        print("=== PARALLEL BENCHMARK ===")
+        println("=== PARALLEL BENCHMARK ===")
         
         var f35 = ask("Worker1", "calc_fib_100k", 35)
         var f36 = ask("Worker2", "calc_fib_100k", 36)
@@ -15,13 +13,13 @@ actor main(name: String) {
         
         var total = f35 + f36 + f37 + f38 + f39 + f40
         print("Total: ")
-        print(total)
+        println(total)
     }
 }
 
 actor Worker1(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {
@@ -43,7 +41,7 @@ actor Worker1(name: String) {
 
 actor Worker2(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {
@@ -65,7 +63,7 @@ actor Worker2(name: String) {
 
 actor Worker3(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {
@@ -87,7 +85,7 @@ actor Worker3(name: String) {
 
 actor Worker4(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {
@@ -109,7 +107,7 @@ actor Worker4(name: String) {
 
 actor Worker5(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {
@@ -131,7 +129,7 @@ actor Worker5(name: String) {
 
 actor Worker6(name: String) {
     io fun run(msg: Start) { }
-    io fun calc_fib_100k(n: Int) {
+    fun calc_fib_100k(n: Int) {
         var result = 0
         var count = 0
         while (count < 100000) {

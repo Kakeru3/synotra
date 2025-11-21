@@ -1,0 +1,34 @@
+class Start()
+
+actor main(name: String) {
+    io fun print(msg: String) { }
+
+    io fun run(msg: Start) {
+        print("=== Recursive Factorial ===")
+        
+        var f1 = factorial(1)
+        var f2 = factorial(2)
+        var f3 = factorial(3)
+        var f4 = factorial(4)
+        var f5 = factorial(5)
+        
+        print("factorial(1) = ")
+        print(f1)
+        print("factorial(2) = ")
+        print(f2)
+        print("factorial(3) = ")
+        print(f3)
+        print("factorial(4) = ")
+        print(f4)
+        print("factorial(5) = ")
+        print(f5)
+    }
+    
+    fun factorial(n: Int): Int {
+        if (n <= 1) {
+            return 1
+        }
+        var prev = factorial(n - 1)
+        return n  * prev
+    }
+}

@@ -241,6 +241,14 @@ fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> 
             // For now, simple lookup if target is self/implicit
             let method_name = method.clone();
             
+            // Check for built-in IO functions
+            if method_name == "print" || method_name == "println" {
+                if !is_io_context {
+                    return Err(format!("Cannot call IO function '{}' from non-IO context", method_name));
+                }
+                return Ok(Type::Int); // Return type doesn't matter much for now
+            }
+
             // Hack: Try to find function in symbol table
             // In a real compiler, we need to resolve type of target, then look up method in that type.
             // Here we assume global functions or local methods for simplicity of this prototype.

@@ -42,8 +42,8 @@ fn main() {
             reply_to: None,
         });
 
-        // Wait for explicit exit signal
-        runtime.wait_for_exit();
+        // Wait for all actors to be idle (no pending messages)
+        runtime.wait_for_idle();
         
         let elapsed = start.elapsed();
         println!("\n⏱️  Total execution time: {:?}", elapsed);

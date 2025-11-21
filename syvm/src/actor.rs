@@ -1,6 +1,8 @@
 use crate::bytecode::*;
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock, Condvar};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::io::Write;
 
 pub struct Actor {
     pub definition: IrActor,
@@ -8,6 +10,9 @@ pub struct Actor {
     pub state: HashMap<String, Value>, // Local variables (SW)
     pub router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
     pub shutdown_signal: mpsc::Sender<()>,
+    pub handlers: HashMap<String, IrHandler>, // Local function handlers
+    pub busy_count: Arc<AtomicUsize>,
+    pub completion_cond: Arc<(Mutex<bool>, Condvar)>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,13 +24,29 @@ pub struct Message {
 }
 
 impl Actor {
-    pub fn new(definition: IrActor, mailbox: mpsc::Receiver<Message>, router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>, shutdown_signal: mpsc::Sender<()>) -> Self {
+    pub fn new(
+        definition: IrActor, 
+        rx: mpsc::Receiver<Message>, 
+        router: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
+        shutdown_signal: mpsc::Sender<()>,
+        busy_count: Arc<AtomicUsize>,
+        completion_cond: Arc<(Mutex<bool>, Condvar)>,
+    ) -> Self {
+        // Build function handlers map from definition
+        let mut handlers = HashMap::new();
+        for handler in &definition.handlers {
+            handlers.insert(handler.name.clone(), handler.clone());
+        }
+        
         Actor {
             definition,
-            mailbox,
+            mailbox: rx,
             state: HashMap::new(),
             router,
             shutdown_signal,
+            handlers,
+            busy_count,
+            completion_cond,
         }
     }
 
@@ -42,7 +63,18 @@ impl Actor {
         let handler = self.definition.handlers.iter().find(|h| h.name == msg.name).cloned();
         
         if let Some(handler) = handler {
+            // Process message
             self.execute_handler(&handler, msg.args, msg.reply_to);
+            
+            // Decrement busy count
+            let prev = self.busy_count.fetch_sub(1, Ordering::SeqCst);
+            if prev == 1 {
+                // Count dropped to 0, signal completion
+                let (lock, cvar) = &*self.completion_cond;
+                let mut finished = lock.lock().unwrap();
+                *finished = true;
+                cvar.notify_all();
+            }
         } else {
             println!("Handler {} not found in actor {}", msg.name, self.definition.name);
             // If reply is expected, send default value
@@ -103,22 +135,49 @@ impl Actor {
                         let res = self.eval_bin_op(op, l, r);
                         locals[*result] = res;
                     }
-                    Instruction::CallPure { result, func: _, args: _ } => {
-                         // ... existing pure calls if any ...
-                         // Still unimplemented, but result is now an index
-                         locals[*result] = Value::ConstInt(0);
+                    Instruction::CallPure { result, func, args } => {
+                        // Evaluate arguments
+                        let arg_vals: Vec<Value> = args.iter()
+                            .map(|a| self.resolve_value(a, &locals))
+                            .collect();
+                        
+                        // Look up function handler
+                        if let Some(handler) = self.handlers.get(func).cloned() {
+                            // Execute function synchronously
+                            let return_val = self.execute_function(&handler, arg_vals);
+                            locals[*result] = return_val;
+                        } else {
+                            // Function not found
+                            eprintln!("Runtime Error: Function '{}' not found", func);
+                            locals[*result] = Value::ConstInt(0);
+                        }
                     }
                     Instruction::CallIo { result, func, args } => {
-                        if func == "print" {
+                        if func == "print" || func == "println" {
                             let val = self.resolve_value(&args[0], &locals);
-                            if let Value::ConstString(s) = val {
-                                println!(">> SYNOTRA IO: {}", s);
-                            } else if let Value::ConstInt(i) = val {
-                                println!(">> SYNOTRA IO: {}", i);
+                            match val {
+                                Value::ConstString(s) => {
+                                    if func == "print" {
+                                        print!("{}", s);
+                                        let _ = std::io::stdout().flush();
+                                    } else {
+                                        println!("{}", s);
+                                    }
+                                }
+                                Value::ConstInt(i) => {
+                                    if func == "print" {
+                                        print!("{}", i);
+                                        let _ = std::io::stdout().flush();
+                                    } else {
+                                        println!("{}", i);
+                                    }
+                                }
+                                _ => {}
                             }
                             locals[*result] = Value::ConstInt(0);
                         }
                     }
+
                     Instruction::Send { target, msg, args } => {
                         let target_val = self.resolve_value(target, &locals);
                         let msg_val = self.resolve_value(msg, &locals);
@@ -132,9 +191,15 @@ impl Actor {
                                     args: arg_vals, 
                                     reply_to: None,
                                 };
+                                
+                                // Increment busy count
+                                self.busy_count.fetch_add(1, Ordering::SeqCst);
+
                                 // Unbounded channel send is non-blocking, so we can do it synchronously
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!("Runtime Error: Failed to send message to {}: {}", target_name, e);
+                                    // Decrement if send failed
+                                    self.busy_count.fetch_sub(1, Ordering::SeqCst);
                                 }
                             } else {
                                 println!("Runtime: Actor {} not found", target_name);
@@ -158,9 +223,13 @@ impl Actor {
                                     reply_to: Some(reply_tx),
                                 };
                                 
+                                // Increment busy count
+                                self.busy_count.fetch_add(1, Ordering::SeqCst);
+                                
                                 // Send message
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!("Runtime Error: Failed to send ask to {}: {}", target_name, e);
+                                    self.busy_count.fetch_sub(1, Ordering::SeqCst);
                                     locals[*result] = Value::ConstInt(0);
                                 } else {
                                     // Async: Return Future immediately
@@ -215,6 +284,8 @@ impl Actor {
         match (op, lhs, rhs) {
             ("add", Value::ConstInt(l), Value::ConstInt(r)) => Value::ConstInt(l + r),
             ("add", Value::ConstString(l), Value::ConstString(r)) => Value::ConstString(format!("{}{}", l, r)),
+            ("add", Value::ConstString(l), Value::ConstInt(r)) => Value::ConstString(format!("{}{}", l, r)),
+            ("add", Value::ConstInt(l), Value::ConstString(r)) => Value::ConstString(format!("{}{}", l, r)),
             ("sub", Value::ConstInt(l), Value::ConstInt(r)) => Value::ConstInt(l - r),
             ("mul", Value::ConstInt(l), Value::ConstInt(r)) => Value::ConstInt(l * r),
             ("div", Value::ConstInt(l), Value::ConstInt(r)) => Value::ConstInt(l / r),
@@ -254,5 +325,126 @@ impl Actor {
                 val
             }
         }
+    }
+
+    fn execute_function(&mut self, handler: &IrHandler, args: Vec<Value>) -> Value {
+        // Execute a function synchronously and return its result
+        // Similar to execute_handler but without reply_to channel
+        
+        // Initialize locals with default values
+        let mut locals: Vec<Value> = vec![Value::ConstInt(0); handler.local_count];
+        
+        // Bind arguments to parameters (first N locals)
+        for (i, _) in handler.params.iter().enumerate() {
+            if let Some(arg_val) = args.get(i) {
+                locals[i] = arg_val.clone();
+            }
+        }
+
+        let mut current_block_idx = 0;
+        let mut return_value = Value::ConstInt(0); // Default return value
+        
+        loop {
+            if current_block_idx >= handler.blocks.len() {
+                break;
+            }
+            let block = &handler.blocks[current_block_idx];
+            
+            for instr in &block.instrs {
+                match instr {
+                    Instruction::Assign(idx, val) => {
+                        let v = match val {
+                            Value::Local(src_idx) => {
+                                if let Some(src_val) = locals.get(*src_idx) {
+                                    if matches!(src_val, Value::Future(_)) {
+                                        src_val.clone()
+                                    } else {
+                                        self.resolve_value(val, &locals)
+                                    }
+                                } else {
+                                    Value::ConstInt(0)
+                                }
+                            }
+                            Value::Future(_) => val.clone(),
+                            _ => self.resolve_value(val, &locals),
+                        };
+                        locals[*idx] = v;
+                    }
+                    Instruction::BinOp { result, op, lhs, rhs } => {
+                        let l = self.resolve_value(lhs, &locals);
+                        let r = self.resolve_value(rhs, &locals);
+                        let res = self.eval_bin_op(op, l, r);
+                        locals[*result] = res;
+                    }
+                    Instruction::CallPure { result, func, args } => {
+                        let arg_vals: Vec<Value> = args.iter()
+                            .map(|a| self.resolve_value(a, &locals))
+                            .collect();
+                        
+                        if let Some(handler) = self.handlers.get(func).cloned() {
+                            let return_val = self.execute_function(&handler, arg_vals);
+                            locals[*result] = return_val;
+                        } else {
+                            eprintln!("Runtime Error: Function '{}' not found", func);
+                            locals[*result] = Value::ConstInt(0);
+                        }
+                    }
+                    Instruction::CallIo { result, func, args } => {
+                        if func == "print" || func == "println" {
+                            let val = self.resolve_value(&args[0], &locals);
+                            match val {
+                                Value::ConstString(s) => {
+                                    if func == "print" {
+                                        print!("{}", s);
+                                        let _ = std::io::stdout().flush();
+                                    } else {
+                                        println!("{}", s);
+                                    }
+                                }
+                                Value::ConstInt(i) => {
+                                    if func == "print" {
+                                        print!("{}", i);
+                                        let _ = std::io::stdout().flush();
+                                    } else {
+                                        println!("{}", i);
+                                    }
+                                }
+                                _ => {}
+                            }
+                            locals[*result] = Value::ConstInt(0);
+                        }
+                    }
+                    Instruction::Exit => {
+                        // Exit is not allowed in pure functions, but handle it anyway
+                        return Value::ConstInt(0);
+                    }
+                    _ => {}
+                }
+            }
+            
+            match &block.terminator {
+                Terminator::Return(val_opt) => {
+                    return_value = if let Some(val) = val_opt {
+                        self.resolve_value(val, &locals)
+                    } else {
+                        Value::ConstInt(0)
+                    };
+                    break;
+                }
+                Terminator::Jump(target) => {
+                    current_block_idx = *target;
+                }
+                Terminator::JumpCond(cond, true_target, false_target) => {
+                    let c = self.resolve_value(cond, &locals);
+                    let is_true = match c {
+                        Value::ConstInt(i) => i != 0,
+                        _ => false,
+                    };
+                    current_block_idx = if is_true { *true_target } else { *false_target };
+                }
+            }
+        }
+        
+        return_value
     }
 }
