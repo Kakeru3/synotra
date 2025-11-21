@@ -1,130 +1,115 @@
-```
-// Sequential (Single-threaded) Recursive Fibonacci
-// Computes fib(35-40) sequentially for comparison with parallel version
-
 class Start()
 
 actor main(name: String) {
     io fun print(msg: String) { }
-    
+
     io fun run(msg: Start) {
-        print("=== SEQUENTIAL RECURSIVE FIBONACCI ===")
-        print("Computing fib(35-40) x 100000 iterations sequentially in one actor")
+        print("=== SEQUENTIAL BENCHMARK ===")
         
-        // Compute fib(35) x 1000
+        // Calculate fib(35)
         var f35 = 0
         var count35 = 0
         while (count35 < 100000) {
-            var a35 = 0
-            var b35 = 1
-            var i35 = 2
-            while (i35 <= 35) {
-                var temp35 = a35 + b35
-                a35 = b35
-                b35 = temp35
-                i35 = i35 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 35) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f35 = b35
+            f35 = a
             count35 = count35 + 1
         }
-        
-        // Compute fib(36) x 1000
+
+        // Calculate fib(36)
         var f36 = 0
         var count36 = 0
         while (count36 < 100000) {
-            var a36 = 0
-            var b36 = 1
-            var i36 = 2
-            while (i36 <= 36) {
-                var temp36 = a36 + b36
-                a36 = b36
-                b36 = temp36
-                i36 = i36 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 36) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f36 = b36
+            f36 = a
             count36 = count36 + 1
         }
-        
-        // Compute fib(37) x 1000
+
+        // Calculate fib(37)
         var f37 = 0
         var count37 = 0
         while (count37 < 100000) {
-            var a37 = 0
-            var b37 = 1
-            var i37 = 2
-            while (i37 <= 37) {
-                var temp37 = a37 + b37
-                a37 = b37
-                b37 = temp37
-                i37 = i37 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 37) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f37 = b37
+            f37 = a
             count37 = count37 + 1
         }
-        
-        // Compute fib(38) x 1000
+
+        // Calculate fib(38)
         var f38 = 0
         var count38 = 0
         while (count38 < 100000) {
-            var a38 = 0
-            var b38 = 1
-            var i38 = 2
-            while (i38 <= 38) {
-                var temp38 = a38 + b38
-                a38 = b38
-                b38 = temp38
-                i38 = i38 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 38) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f38 = b38
+            f38 = a
             count38 = count38 + 1
         }
-        
-        // Compute fib(39) x 1000
+
+        // Calculate fib(39)
         var f39 = 0
         var count39 = 0
         while (count39 < 100000) {
-            var a39 = 0
-            var b39 = 1
-            var i39 = 2
-            while (i39 <= 39) {
-                var temp39 = a39 + b39
-                a39 = b39
-                b39 = temp39
-                i39 = i39 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 39) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f39 = b39
+            f39 = a
             count39 = count39 + 1
         }
-        
-        // Compute fib(40) x 1000
+
+        // Calculate fib(40)
         var f40 = 0
         var count40 = 0
         while (count40 < 100000) {
-            var a40 = 0
-            var b40 = 1
-            var i40 = 2
-            while (i40 <= 40) {
-                var temp40 = a40 + b40
-                a40 = b40
-                b40 = temp40
-                i40 = i40 + 1
+            var a = 0
+            var b = 1
+            var i = 0
+            while (i < 40) {
+                var temp = a + b
+                a = b
+                b = temp
+                i = i + 1
             }
-            f40 = b40
+            f40 = a
             count40 = count40 + 1
         }
         
-        var sum = f35 + f36 + f37 + f38 + f39 + f40
-        
-        print("Results:")
-        print(f35)
-        print(f36)
-        print(f37)
-        print(f38)
-        print(f39)
-        print(f40)
-        print("Sum of all results:")
-        print(sum)
-        print("=== SEQUENTIAL COMPLETE ===")
+        var total = f35 + f36 + f37 + f38 + f39 + f40
+        print("Total: ")
+        print(total)
     }
 }
-```
