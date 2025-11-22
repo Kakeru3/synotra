@@ -21,6 +21,28 @@ cd synotra
 
 # Build the compiler and VM (release mode for best performance)
 cargo build --release
+```
+
+### Running Programs
+
+Use the `run.sh` script for quick development (compiles and runs in one command):
+
+```bash
+# Run a .sy file directly
+./run.sh example/map_test.sy
+```
+
+Or compile and run manually:
+
+```bash
+# 1. Compile .sy to .syi
+./target/release/synotra example/your_program.sy > example/your_program.syi
+
+# 2. Run with the VM
+cd syvm
+cargo run --release -- ../example/your_program.syi
+```
+
 
 ## Language Syntax
 

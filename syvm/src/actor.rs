@@ -1,5 +1,5 @@
 use crate::bytecode::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Condvar};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io::Write;
@@ -141,8 +141,14 @@ impl Actor {
                             .map(|a| self.resolve_value(a, &locals))
                             .collect();
                         
-                        // Look up function handler
-                        if let Some(handler) = self.handlers.get(func).cloned() {
+                        // Check for built-in collection constructors
+                        if func == "List.new" {
+                            locals[*result] = Value::List(Vec::new());
+                        } else if func == "MutableMap.new" {
+                            locals[*result] = Value::Map(HashMap::new());
+                        } else if func == "MutableSet.new" {
+                            locals[*result] = Value::Set(HashSet::new());
+                        } else if let Some(handler) = self.handlers.get(func).cloned() {
                             // Execute function synchronously
                             let return_val = self.execute_function(&handler, arg_vals);
                             locals[*result] = return_val;
@@ -248,6 +254,55 @@ impl Actor {
                         // Signal shutdown
                         let _ = self.shutdown_signal.send(());
                     }
+                    Instruction::SwLoad { result, collection, index } => {
+                        // Resolve index first
+                        let idx_val = self.resolve_value(&Value::Local(*index), &locals);
+                        let col_val = &locals[*collection];
+                        
+                        match col_val {
+                            Value::List(list) => {
+                                if let Value::ConstInt(i) = idx_val {
+                                    if i >= 0 && (i as usize) < list.len() {
+                                        locals[*result] = list[i as usize].clone();
+                                    } else {
+                                        eprintln!("Runtime Error: List index out of bounds: {}", i);
+                                        locals[*result] = Value::ConstInt(0);
+                                    }
+                                } else {
+                                    eprintln!("Runtime Error: List index must be Int");
+                                    locals[*result] = Value::ConstInt(0);
+                                }
+                            }
+                            Value::Map(map) => {
+                                if let Some(val) = map.get(&idx_val) {
+                                    locals[*result] = val.clone();
+                                } else {
+                                    // Return 0/Null if key not found
+                                    locals[*result] = Value::ConstInt(0); 
+                                }
+                            }
+                            _ => {
+                                eprintln!("Runtime Error: SwLoad on non-collection");
+                                locals[*result] = Value::ConstInt(0);
+                            }
+                        }
+                    }
+                    Instruction::SwStore { collection, index, value } => {
+                        let idx_val = self.resolve_value(&Value::Local(*index), &locals);
+                        let val_val = self.resolve_value(&Value::Local(*value), &locals);
+                        
+                        match &mut locals[*collection] {
+                            Value::List(_) => {
+                                eprintln!("Runtime Error: Cannot assign to immutable List");
+                            }
+                            Value::Map(map) => {
+                                map.insert(idx_val, val_val);
+                            }
+                            _ => {
+                                eprintln!("Runtime Error: SwStore on non-collection");
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -303,6 +358,7 @@ impl Actor {
         match val {
             Value::ConstInt(i) => Value::ConstInt(*i),
             Value::ConstString(s) => Value::ConstString(s.clone()),
+            Value::ConstBool(b) => Value::ConstBool(*b),
             Value::Local(idx) => {
                 if let Some(v) = locals.get(*idx) {
                     self.resolve_value(v, locals)  // Always recursively resolve
@@ -324,6 +380,9 @@ impl Actor {
                 *state = FutureState::Resolved(Box::new(val.clone()));
                 val
             }
+            Value::List(list) => Value::List(list.clone()),
+            Value::Map(map) => Value::Map(map.clone()),
+            Value::Set(set) => Value::Set(set.clone()),
         }
     }
 
