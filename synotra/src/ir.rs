@@ -1,4 +1,6 @@
 use serde::{Serialize, Deserialize};
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrProgram {
@@ -56,6 +58,16 @@ pub enum Instruction {
         msg: Value,
         args: Vec<Value>,
     },
+    SwLoad {
+        result: usize,
+        collection: usize,
+        index: usize,
+    },
+    SwStore {
+        collection: usize,
+        index: usize,
+        value: usize,
+    },
     Exit,
 }
 
@@ -66,9 +78,48 @@ pub enum Terminator {
     JumpCond(Value, usize, usize),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Value {
     ConstInt(i64),
     ConstString(String),
+    ConstBool(bool),
     Local(usize), // Local variable index
+    
+    // Collections
+    List(Vec<Value>),
+    Map(HashMap<Value, Value>),
+    Set(HashSet<Value>),
+}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Value::ConstInt(i) => {
+                0u8.hash(state);
+                i.hash(state);
+            }
+            Value::ConstString(s) => {
+                1u8.hash(state);
+                s.hash(state);
+            }
+            Value::ConstBool(b) => {
+                2u8.hash(state);
+                b.hash(state);
+            }
+            Value::Local(l) => {
+                3u8.hash(state);
+                l.hash(state);
+            }
+            Value::List(l) => {
+                5u8.hash(state);
+                l.hash(state);
+            }
+            Value::Map(_) => {
+                panic!("Cannot hash Map");
+            }
+            Value::Set(_) => {
+                panic!("Cannot hash Set");
+            }
+        }
+    }
 }

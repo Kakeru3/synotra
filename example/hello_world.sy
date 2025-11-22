@@ -1,11 +1,7 @@
 // Simple "Hello World" actor
-class Start()
-
-actor Greeter(name: String) {
-    io fun print(msg: String) { }
-    
-    io fun run(msg: Start) {
-        print("Hello, World!")
-        print("I am an actor in Synotra!")
+actor main(name: String) {
+    var str = ", World!"
+    io fun run() {
+        println("Hello${str}")
     }
 }

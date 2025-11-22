@@ -6,6 +6,8 @@ use std::fmt;
 #[logos(skip r"//[^\n]*")] // Skip single-line comments
 pub enum Token {
     // Keywords
+    #[token("import", priority = 2)]
+    Import,
     #[token("actor")]
     Actor,
     #[token("class")]
@@ -50,6 +52,10 @@ pub enum Token {
     LBrace,
     #[token("}")]
     RBrace,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
     #[token(":")]
     Colon,
     #[token(",")]
@@ -92,7 +98,7 @@ pub enum Token {
     String(String),
 
     // Identifiers
-    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 0)]
     Ident(String),
 
     // Error

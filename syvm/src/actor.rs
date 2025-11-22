@@ -377,16 +377,72 @@ impl Actor {
                         locals[*result] = res;
                     }
                     Instruction::CallPure { result, func, args } => {
-                        let arg_vals: Vec<Value> = args.iter()
-                            .map(|a| self.resolve_value(a, &locals))
-                            .collect();
+                        let arg_vals: Vec<Value> = args.iter().map(|a| self.resolve_value(a, &locals)).collect();
                         
-                        if let Some(handler) = self.handlers.get(func).cloned() {
-                            let return_val = self.execute_function(&handler, arg_vals);
-                            locals[*result] = return_val;
+                        if func == "List.new" {
+                             locals[*result] = Value::List(Vec::new());
+                        } else if func == "MutableMap.new" {
+                             locals[*result] = Value::Map(HashMap::new());
+                        } else if func == "MutableSet.new" {
+                             locals[*result] = Value::Set(HashSet::new());
                         } else {
-                            eprintln!("Runtime Error: Function '{}' not found", func);
-                            locals[*result] = Value::ConstInt(0);
+                            if let Some(handler) = self.handlers.get(func).cloned() {
+                                let return_val = self.execute_function(&handler, arg_vals);
+                                locals[*result] = return_val;
+                            } else {
+                                // Function not found
+                                eprintln!("Runtime Error: Function '{}' not found", func);
+                                locals[*result] = Value::ConstInt(0);
+                            }
+                        }
+                    }
+                    Instruction::SwLoad { result, collection, index } => {
+                        // Resolve index first
+                        let idx_val = self.resolve_value(&Value::Local(*index), &locals);
+                        let col_val = &locals[*collection];
+                        
+                        match col_val {
+                            Value::List(list) => {
+                                if let Value::ConstInt(i) = idx_val {
+                                    if i >= 0 && (i as usize) < list.len() {
+                                        locals[*result] = list[i as usize].clone();
+                                    } else {
+                                        eprintln!("Runtime Error: List index out of bounds: {}", i);
+                                        locals[*result] = Value::ConstInt(0);
+                                    }
+                                } else {
+                                    eprintln!("Runtime Error: List index must be Int");
+                                    locals[*result] = Value::ConstInt(0);
+                                }
+                            }
+                            Value::Map(map) => {
+                                if let Some(val) = map.get(&idx_val) {
+                                    locals[*result] = val.clone();
+                                } else {
+                                    // Return 0/Null if key not found
+                                    locals[*result] = Value::ConstInt(0); 
+                                }
+                            }
+                            _ => {
+                                eprintln!("Runtime Error: SwLoad on non-collection");
+                                locals[*result] = Value::ConstInt(0);
+                            }
+                        }
+                    }
+                    Instruction::SwStore { collection, index, value } => {
+                        let idx_val = self.resolve_value(&Value::Local(*index), &locals);
+                        let val_val = self.resolve_value(&Value::Local(*value), &locals);
+                        
+                        match &mut locals[*collection] {
+                            Value::List(_) => {
+                                eprintln!("Runtime Error: Cannot assign to immutable List");
+                            }
+                            Value::Map(map) => {
+                                map.insert(idx_val, val_val);
+                            }
+                            _ => {
+                                eprintln!("Runtime Error: SwStore on non-collection");
+                            }
                         }
                     }
                     Instruction::CallIo { result, func, args } => {

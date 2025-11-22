@@ -2,16 +2,153 @@ use chumsky::prelude::*;
 use crate::ast::*;
 use crate::lexer::Token;
 
+// Helper function to parse expressions from token sequence (for string interpolation)
+fn parse_expr_from_tokens(tokens: &[Token]) -> Result<Expr, String> {
+    if tokens.is_empty() {
+        return Err("Empty expression".to_string());
+    }
+    
+    let mut pos = 0;
+    parse_comparison(tokens, &mut pos)
+}
+
+fn parse_comparison(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+    let mut left = parse_additive(tokens, pos)?;
+    
+    while *pos < tokens.len() {
+        let op = match &tokens[*pos] {
+            Token::EqEq => BinaryOp::Eq,
+            Token::NotEq => BinaryOp::Ne,
+            Token::Lt => BinaryOp::Lt,
+            Token::LtEq => BinaryOp::Le,
+            Token::Gt => BinaryOp::Gt,
+            Token::GtEq => BinaryOp::Ge,
+            _ => break,
+        };
+        *pos += 1;
+        let right = parse_additive(tokens, pos)?;
+        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+    }
+    
+    Ok(left)
+}
+
+fn parse_additive(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+    let mut left = parse_multiplicative(tokens, pos)?;
+    
+    while *pos < tokens.len() {
+        let op = match &tokens[*pos] {
+            Token::Plus => BinaryOp::Add,
+            Token::Minus => BinaryOp::Sub,
+            _ => break,
+        };
+        *pos += 1;
+        let right = parse_multiplicative(tokens, pos)?;
+        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+    }
+    
+    Ok(left)
+}
+
+fn parse_multiplicative(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+    let mut left = parse_postfix(tokens, pos)?;
+    
+    while *pos < tokens.len() {
+        let op = match &tokens[*pos] {
+            Token::Star => BinaryOp::Mul,
+            Token::Slash => BinaryOp::Div,
+            _ => break,
+        };
+        *pos += 1;
+        let right = parse_postfix(tokens, pos)?;
+        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+    }
+    
+    Ok(left)
+}
+
+fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+    let mut expr = parse_atom(tokens, pos)?;
+    
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::LBracket => {
+                *pos += 1; // Skip '['
+                let index = parse_comparison(tokens, pos)?;
+                if *pos < tokens.len() && tokens[*pos] == Token::RBracket {
+                    *pos += 1; // Skip ']'
+                    expr = Expr::Index(Box::new(expr), Box::new(index));
+                } else {
+                    return Err("Expected ']'".to_string());
+                }
+            }
+            _ => break,
+        }
+    }
+    Ok(expr)
+}
+
+fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
+    if *pos >= tokens.len() {
+        return Err("Unexpected end of expression".to_string());
+    }
+    
+    match &tokens[*pos] {
+        Token::Int(i) => {
+            *pos += 1;
+            Ok(Expr::Literal(Literal::Int(*i)))
+        }
+        Token::String(s) => {
+            let s = s.clone();
+            *pos += 1;
+            Ok(Expr::Literal(Literal::String(s)))
+        }
+        Token::Ident(name) => {
+            let name = name.clone();
+            *pos += 1;
+            Ok(Expr::Variable(name))
+        }
+        Token::LParen => {
+            *pos += 1; // Skip '('
+            let expr = parse_comparison(tokens, pos)?;
+            if *pos < tokens.len() && tokens[*pos] == Token::RParen {
+                *pos += 1; // Skip ')'
+                Ok(expr)
+            } else {
+                Err("Expected ')'".to_string())
+            }
+        }
+        _ => Err(format!("Unexpected token: {:?}", tokens[*pos])),
+    }
+}
+
+
 pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     let ident = select! { Token::Ident(ident) => ident };
     let int_lit = select! { Token::Int(i) => Literal::Int(i) };
     let str_lit = select! { Token::String(s) => s };
 
-    let type_parser = ident.map(|s| match s.as_str() {
-        "Int" => Type::Int,
-        "String" => Type::String,
-        "Bool" => Type::Bool,
-        _ => Type::UserDefined(s),
+    let type_parser = recursive(|type_parser| {
+        ident
+            .then(
+                type_parser.separated_by(just(Token::Comma))
+                    .delimited_by(just(Token::Lt), just(Token::Gt))
+                    .or_not()
+            )
+            .map(|(name, args)| {
+                match name.as_str() {
+                    "Int" => Type::Int,
+                    "String" => Type::String,
+                    "Bool" => Type::Bool,
+                    _ => {
+                        if let Some(args) = args {
+                            Type::Generic(name, args)
+                        } else {
+                            Type::UserDefined(name)
+                        }
+                    }
+                }
+            })
     });
 
     let expr = recursive(|expr| {
@@ -38,10 +175,13 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             ask_expr,
             int_lit.map(Expr::Literal),
             str_lit.map(|s| {
-                // Parse interpolated string: "Hello ${name}!"
+                use logos::Logos;
+                use crate::lexer::Token as LexToken;
+                
+                // Parse interpolated string: "Hello ${name}!" or "Result: ${a + b}"
                 let mut parts = Vec::new();
                 let mut last_end = 0;
-                let mut chars: Vec<(usize, char)> = s.char_indices().collect();
+                let chars: Vec<(usize, char)> = s.char_indices().collect();
                 let len = s.len();
                 
                 let mut i = 0;
@@ -56,15 +196,35 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                         // Find end of interpolation
                         let start_var = i + 2;
                         let mut end_var = start_var;
-                        while end_var < chars.len() && chars[end_var].1 != '}' {
-                            end_var += 1;
+                        let mut brace_depth = 1;
+                        while end_var < chars.len() && brace_depth > 0 {
+                            if chars[end_var].1 == '{' {
+                                brace_depth += 1;
+                            } else if chars[end_var].1 == '}' {
+                                brace_depth -= 1;
+                            }
+                            if brace_depth > 0 {
+                                end_var += 1;
+                            }
                         }
                         
                         if end_var < chars.len() {
-                            let var_name_start = chars[start_var].0;
-                            let var_name_end = chars[end_var].0;
-                            let var_name = s[var_name_start..var_name_end].to_string();
-                            parts.push(Expr::Variable(var_name));
+                            let expr_start = chars[start_var].0;
+                            let expr_end = chars[end_var].0;
+                            let expr_str = s[expr_start..expr_end].to_string().replace("\\\"", "\"");
+                            
+                            // Tokenize the expression
+                            let mut lexer = LexToken::lexer(&expr_str);
+                            let tokens: Vec<LexToken> = lexer.filter_map(|t| t.ok()).collect();
+                            
+                            // Parse the expression from tokens
+                            if let Ok(parsed_expr) = parse_expr_from_tokens(&tokens) {
+                                parts.push(parsed_expr);
+                            } else {
+                                // Fallback: treat as variable name
+                                parts.push(Expr::Variable(expr_str));
+                            }
+                            
                             last_end = chars[end_var].0 + 1; // Skip '}'
                             i = end_var;
                         }
@@ -91,18 +251,77 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         ));
 
         let call = atom.clone()
-            .then(just(Token::Dot).ignore_then(ident).or_not())
-            .then(expr.clone().separated_by(just(Token::Comma)).delimited_by(just(Token::LParen), just(Token::RParen)).or_not())
-            .map(|((target, method), args)| {
-                if let Some(args) = args {
-                    if let Some(m) = method {
-                        Expr::Call(Box::new(target), m, args)
-                    } else {
-                        if let Expr::Variable(name) = target {
-                            Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
+            .then(
+                choice((
+                    // Method call: .method(args)
+                    just(Token::Dot)
+                        .ignore_then(ident)
+                        .then(expr.clone().separated_by(just(Token::Comma)).delimited_by(just(Token::LParen), just(Token::RParen)).or_not())
+                        .map(|(method, args)| (Some(method), args, false)), // (method, args, is_index)
+                    
+                    // Function call: (args)
+                    expr.clone().separated_by(just(Token::Comma))
+                        .delimited_by(just(Token::LParen), just(Token::RParen))
+                        .map(|args| (Some("invoke".to_string()), Some(args), false)), // Treat as invoke or handle in map
+                    
+                    // Index access: [index]
+                    expr.clone()
+                        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+                        .map(|index| (None, Some(vec![index]), true)), // (None, [index], is_index)
+                ))
+                .or_not()
+            )
+            .map(|(target, call_suffix)| {
+                if let Some((method, args, is_index)) = call_suffix {
+                    if is_index {
+                        // Index access: target[index]
+                        let index = args.unwrap().into_iter().next().unwrap();
+                        Expr::Index(Box::new(target), Box::new(index))
+                    } else if let Some(args) = args {
+                        // Method or Function call
+                        if let Some(m) = method {
+                            if m == "invoke" {
+                                // Function call: target(args)
+                                // If target is a variable, it's a function call.
+                                // If target is an expression, it's an invoke?
+                                // For println(args), target is Variable("println").
+                                // We want Expr::Call(Variable("self"), "println", args) ??
+                                // No, Expr::Call structure is (target, method, args).
+                                // If I have `println(...)`, it's a global function or method on self.
+                                // In original parser:
+                                // if let Expr::Variable(name) = target {
+                                //      Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
+                                // }
+                                
+                                if let Expr::Variable(name) = target {
+                                     // Check if it's a known global or just treat as method on self/global
+                                     // For now, map to Call(self, name, args) is what original did?
+                                     // Wait, original did:
+                                     // if let Some(m) = method { Call(target, m, args) }
+                                     // else { if Variable(name) = target { Call(self, name, args) } else { Call(target, "invoke", args) } }
+                                     
+                                     // Here m is "invoke" (my placeholder).
+                                     // So I should check if I really have a method name from Dot.
+                                     // But I merged them.
+                                     
+                                     // Let's distinguish Dot call from Paren call.
+                                     // I can use an enum in map instead of tuple.
+                                     
+                                     Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
+                                } else {
+                                     Expr::Call(Box::new(target), "invoke".to_string(), args)
+                                }
+                            } else {
+                                // Method call: target.method(args)
+                                Expr::Call(Box::new(target), m, args)
+                            }
                         } else {
-                            Expr::Call(Box::new(target), "invoke".to_string(), args)
+                            // Should not happen
+                            target
                         }
+                    } else {
+                         // Property access (field) - not handled yet
+                         target
                     }
                 } else {
                     target
@@ -204,6 +423,15 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .then(expr.clone())
             .map(|(name, value)| Stmt::Assign(name, value));
 
+        let assign_index_stmt = ident.clone()
+            .then(
+                expr.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            )
+            .then_ignore(just(Token::Equals))
+            .then(expr.clone())
+            .map(|((name, index), value)| Stmt::AssignIndex(name, Box::new(index), Box::new(value)));
+
         let expr_stmt = expr.clone().map(Stmt::Expr);
 
         let_stmt
@@ -213,6 +441,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .or(if_stmt)
             .or(while_stmt)
             .or(for_stmt)
+            .or(assign_index_stmt) // Check index assignment before simple assignment if ambiguous, but here they start different
             .or(assign_stmt)
             .or(expr_stmt)
         .then_ignore(just(Token::Dot).or_not()) // Optional semicolon/dot? Synotra doesn't specify, assuming optional or none
@@ -262,9 +491,37 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             members,
         });
 
+
+    // import std.collections.List<T>
+    // Allow keywords like "io" in import paths
+    let import_path_segment = select! {
+        Token::Ident(name) => name,
+        Token::Io => "io".to_string(),
+        Token::Fun => "fun".to_string(),
+        Token::Class => "class".to_string(),
+        Token::Actor => "actor".to_string(),
+    };
+    
+    let import_def = just(Token::Import)
+        .ignore_then(
+            import_path_segment.separated_by(just(Token::Dot))
+                .at_least(1)
+        )
+        .then(
+            ident.separated_by(just(Token::Comma))
+                .delimited_by(just(Token::Lt), just(Token::Gt))
+                .or_not()
+        )
+        .map(|(path, type_params)| ImportDef {
+            path,
+            type_params: type_params.unwrap_or_default(),
+        });
+
     let definition = choice((
+        import_def.map(Definition::Import),
         actor_def.map(Definition::Actor),
         message_def.map(Definition::Message),
+
         function_def.map(Definition::Function),
     ));
 

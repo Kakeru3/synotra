@@ -41,6 +41,17 @@ impl Codegen {
         id
     }
 
+    fn value_to_local_idx(&mut self, val: Value) -> usize {
+        match val {
+            Value::Local(idx) => idx,
+            _ => {
+                let idx = self.alloc_temp();
+                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+                idx
+            }
+        }
+    }
+
     fn new_block(&mut self) {
         let idx = self.blocks.len();
         self.blocks.push(BasicBlock {
@@ -117,6 +128,20 @@ impl Codegen {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
                 self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+            }
+            Stmt::AssignIndex(name, index, value) => {
+                let collection_idx = self.get_or_alloc_local(name);
+                let index_val = self.gen_expr(index);
+                let value_val = self.gen_expr(value);
+                
+                let index_idx = self.value_to_local_idx(index_val);
+                let value_idx = self.value_to_local_idx(value_val);
+                
+                self.current_block_mut().instrs.push(Instruction::SwStore {
+                    collection: collection_idx,
+                    index: index_idx,
+                    value: value_idx,
+                });
             }
             Stmt::Expr(expr) => {
                 self.gen_expr(expr);
@@ -296,7 +321,36 @@ impl Codegen {
                 });
                 Value::Local(res)
             }
+            Expr::Index(target, index) => {
+                let target_val = self.gen_expr(target);
+                let index_val = self.gen_expr(index);
+                
+                let collection_idx = self.value_to_local_idx(target_val);
+                let index_idx = self.value_to_local_idx(index_val);
+                
+                let res = self.alloc_temp();
+                self.current_block_mut().instrs.push(Instruction::SwLoad {
+                    result: res,
+                    collection: collection_idx,
+                    index: index_idx,
+                });
+                Value::Local(res)
+            }
             Expr::Call(target, method, args) => {
+                // Handle static calls for collections (e.g. List.new())
+                if let Expr::Variable(name) = &**target {
+                    if name == "List" || name == "MutableMap" || name == "MutableSet" {
+                        let func_name = format!("{}.{}", name, method);
+                        let res = self.alloc_temp();
+                        self.current_block_mut().instrs.push(Instruction::CallPure {
+                            result: res,
+                            func: func_name,
+                            args: vec![], // Constructors usually don't take args for now
+                        });
+                        return Value::Local(res);
+                    }
+                }
+
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let res = self.alloc_temp();
                 

@@ -5,10 +5,18 @@ pub struct Program {
 
 #[derive(Debug, Clone)]
 pub enum Definition {
+    Import(ImportDef),
     Actor(ActorDef),
     Message(MessageDef),
     Function(FunctionDef),
     Module(ModuleDef),
+}
+
+
+#[derive(Debug, Clone)]
+pub struct ImportDef {
+    pub path: Vec<String>,         // e.g., ["std", "collections", "List"]
+    pub type_params: Vec<String>,  // e.g., ["T"] or ["K", "V"]
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +75,7 @@ pub enum Type {
     String,
     Bool,
     UserDefined(String),
+    Generic(String, Vec<Type>), // e.g., List<Int>
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +88,7 @@ pub enum Stmt {
     Let(String, Option<Type>, Expr),
     Var(String, Option<Type>, Expr),
     Assign(String, Expr), // variable reassignment
+    AssignIndex(String, Box<Expr>, Box<Expr>), // name[index] = value
     Expr(Expr),
     Return(Option<Expr>),
     Send { target: Expr, message: Expr, args: Vec<Expr> },
@@ -92,6 +102,7 @@ pub enum Expr {
     Literal(Literal),
     Variable(String),
     Call(Box<Expr>, String, Vec<Expr>), // target.method(args) or func(args)
+    Index(Box<Expr>, Box<Expr>), // target[index]
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
     Ask { target: Box<Expr>, message: Box<Expr>, args: Vec<Expr> },
 }

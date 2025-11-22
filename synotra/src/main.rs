@@ -20,9 +20,10 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let src = fs::read_to_string(&args.input).expect("Failed to read input file");
 
-    let lexer = Token::lexer(&src);
+    let code = fs::read_to_string(&args.input).expect("Failed to read input file");
+
+    let lexer = Token::lexer(&code);
     let tokens: Vec<_> = lexer.filter_map(|t| t.ok()).collect(); // TODO: Handle errors
     println!("Tokens: {:?}", tokens);
 

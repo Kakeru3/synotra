@@ -56,6 +56,16 @@ pub enum Instruction {
         msg: Value,
         args: Vec<Value>,
     },
+    SwLoad {
+        result: usize,
+        collection: usize, // Local index of collection
+        index: usize,      // Local index of key/index
+    },
+    SwStore {
+        collection: usize, // Local index of collection
+        index: usize,      // Local index of key/index
+        value: usize,      // Local index of value
+    },
     Exit,
 }
 
@@ -69,6 +79,8 @@ pub enum Terminator {
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Receiver;
 use serde::{Serializer, Deserializer};
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug)]
 pub enum FutureState {
@@ -78,6 +90,20 @@ pub enum FutureState {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeFuture(pub Arc<Mutex<FutureState>>);
+
+impl PartialEq for RuntimeFuture {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for RuntimeFuture {}
+
+impl Hash for RuntimeFuture {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
 
 impl Serialize for RuntimeFuture {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -94,11 +120,54 @@ impl<'de> Deserialize<'de> for RuntimeFuture {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Value {
     ConstInt(i64),
     ConstString(String),
+    ConstBool(bool),
     Local(usize), // Local variable index
     #[serde(skip)]
     Future(RuntimeFuture),
+    
+    // Collections
+    List(Vec<Value>),
+    Map(HashMap<Value, Value>),
+    Set(HashSet<Value>),
+}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Value::ConstInt(i) => {
+                0u8.hash(state);
+                i.hash(state);
+            }
+            Value::ConstString(s) => {
+                1u8.hash(state);
+                s.hash(state);
+            }
+            Value::ConstBool(b) => {
+                2u8.hash(state);
+                b.hash(state);
+            }
+            Value::Local(l) => {
+                3u8.hash(state);
+                l.hash(state);
+            }
+            Value::Future(f) => {
+                4u8.hash(state);
+                f.hash(state);
+            }
+            Value::List(l) => {
+                5u8.hash(state);
+                l.hash(state);
+            }
+            Value::Map(_) => {
+                panic!("Cannot hash Map");
+            }
+            Value::Set(_) => {
+                panic!("Cannot hash Set");
+            }
+        }
+    }
 }
