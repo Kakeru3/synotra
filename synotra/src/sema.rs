@@ -8,7 +8,7 @@ pub struct SymbolTable {
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
-    Variable(Type, bool), // Type, is_mutable
+    Variable(Type, bool),                    // Type, is_mutable
     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
     Actor(String),
     Message(String),
@@ -47,7 +47,7 @@ impl SymbolTable {
 
 pub fn analyze(program: &Program) -> Result<(), String> {
     let mut symbols = SymbolTable::new();
-    
+
     // 1. Register top-level definitions
     for def in &program.definitions {
         match def {
@@ -59,7 +59,10 @@ pub fn analyze(program: &Program) -> Result<(), String> {
             }
             Definition::Function(func) => {
                 let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
-                symbols.insert(func.name.clone(), Symbol::Function(param_types, func.return_type.clone(), func.is_io));
+                symbols.insert(
+                    func.name.clone(),
+                    Symbol::Function(param_types, func.return_type.clone(), func.is_io),
+                );
             }
             Definition::Import(_import) => {
                 // TODO: Register imported types in symbol table
@@ -86,29 +89,44 @@ pub fn analyze(program: &Program) -> Result<(), String> {
 
 fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), String> {
     symbols.enter_scope();
-    
+
     // Register params as variables
     for param in &actor.params {
-        symbols.insert(param.name.clone(), Symbol::Variable(param.ty.clone(), false));
+        symbols.insert(
+            param.name.clone(),
+            Symbol::Variable(param.ty.clone(), false),
+        );
     }
 
     // Register members
     for member in &actor.members {
         match member {
             ActorMember::Field(field) => {
-                symbols.insert(field.name.clone(), Symbol::Variable(field.ty.clone(), field.is_mutable));
+                symbols.insert(
+                    field.name.clone(),
+                    Symbol::Variable(field.ty.clone(), field.is_mutable),
+                );
             }
             ActorMember::Method(method) => {
                 let param_types = method.params.iter().map(|p| p.ty.clone()).collect();
-                symbols.insert(method.name.clone(), Symbol::Function(param_types, method.return_type.clone(), method.is_io));
+                symbols.insert(
+                    method.name.clone(),
+                    Symbol::Function(param_types, method.return_type.clone(), method.is_io),
+                );
             }
         }
     }
 
-    // Analyze methods
+    // Analyze field initializations and methods
     for member in &actor.members {
-        if let ActorMember::Method(method) = member {
-            analyze_function(method, symbols)?;
+        match member {
+            ActorMember::Field(field) => {
+                // Analyze the initialization expression
+                analyze_expr(&field.init, symbols, false)?;
+            }
+            ActorMember::Method(method) => {
+                analyze_function(method, symbols)?;
+            }
         }
     }
 
@@ -125,7 +143,10 @@ fn analyze_function(func: &FunctionDef, symbols: &mut SymbolTable) -> Result<(),
     symbols.enter_scope();
 
     for param in &func.params {
-        symbols.insert(param.name.clone(), Symbol::Variable(param.ty.clone(), false));
+        symbols.insert(
+            param.name.clone(),
+            Symbol::Variable(param.ty.clone(), false),
+        );
     }
 
     for stmt in &func.body.stmts {
@@ -155,7 +176,12 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                             return Err(format!("Cannot assign to immutable variable '{}'", name));
                         }
                     }
-                    _ => return Err(format!("'{}' is not a variable and cannot be assigned to", name)),
+                    _ => {
+                        return Err(format!(
+                            "'{}' is not a variable and cannot be assigned to",
+                            name
+                        ))
+                    }
                 }
             } else {
                 return Err(format!("Variable '{}' not declared", name));
@@ -168,7 +194,10 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 match sym {
                     Symbol::Variable(ty, is_mutable) => {
                         if !is_mutable {
-                            return Err(format!("Cannot assign to immutable collection '{}'", name));
+                            return Err(format!(
+                                "Cannot assign to immutable collection '{}'",
+                                name
+                            ));
                         }
                         // TODO: Check if ty is a Map or List that supports assignment
                         // For now, assume it is if it's a variable
@@ -189,12 +218,18 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 analyze_expr(e, symbols, is_io_context)?;
             }
         }
-        Stmt::Send { target, message, args } => {
+        Stmt::Send {
+            target,
+            message,
+            args,
+        } => {
             // Check: send() can only be used in IO context
             if !is_io_context {
-                return Err("Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string());
+                return Err(
+                    "Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string(),
+                );
             }
-            
+
             analyze_expr(target, symbols, is_io_context)?;
             analyze_expr(message, symbols, is_io_context)?;
             for arg in args {
@@ -204,7 +239,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
         Stmt::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
-            
+
             symbols.enter_scope();
             for s in &then_block.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
@@ -221,7 +256,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
         }
         Stmt::While(cond, body) => {
             analyze_expr(cond, symbols, is_io_context)?;
-            
+
             symbols.enter_scope();
             for s in &body.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
@@ -231,10 +266,10 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
         Stmt::For(iter, start, end, body) => {
             analyze_expr(start, symbols, is_io_context)?;
             analyze_expr(end, symbols, is_io_context)?;
-            
+
             symbols.enter_scope();
             symbols.insert(iter.clone(), Symbol::Variable(Type::Int, false)); // Iterator is immutable int
-            
+
             for s in &body.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
             }
@@ -244,7 +279,11 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
     Ok(())
 }
 
-fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> Result<Type, String> {
+fn analyze_expr(
+    expr: &Expr,
+    symbols: &mut SymbolTable,
+    is_io_context: bool,
+) -> Result<Type, String> {
     match expr {
         Expr::Literal(lit) => match lit {
             Literal::Int(_) => Ok(Type::Int),
@@ -269,7 +308,7 @@ fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> 
         Expr::Index(target, index) => {
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
             analyze_expr(index, symbols, is_io_context)?;
-            
+
             // TODO: Check if target_ty is a collection and return element type
             // For now, if it's a Generic, assume it returns the first type arg (e.g. List<T> -> T)
             // Or second if Map<K, V> -> V
@@ -290,16 +329,19 @@ fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> 
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
             }
-            
+
             // Check if calling IO function from non-IO context
             // 1. Resolve method
             // For now, simple lookup if target is self/implicit
             let method_name = method.clone();
-            
+
             // Check for built-in IO functions
             if method_name == "print" || method_name == "println" {
                 if !is_io_context {
-                    return Err(format!("Cannot call IO function '{}' from non-IO context", method_name));
+                    return Err(format!(
+                        "Cannot call IO function '{}' from non-IO context",
+                        method_name
+                    ));
                 }
                 return Ok(Type::Int); // Return type doesn't matter much for now
             }
@@ -309,18 +351,27 @@ fn analyze_expr(expr: &Expr, symbols: &mut SymbolTable, is_io_context: bool) -> 
             // Here we assume global functions or local methods for simplicity of this prototype.
             if let Some(Symbol::Function(_, _, is_io_target)) = symbols.lookup(&method_name) {
                 if *is_io_target && !is_io_context {
-                    return Err(format!("Cannot call IO function '{}' from non-IO context", method_name));
+                    return Err(format!(
+                        "Cannot call IO function '{}' from non-IO context",
+                        method_name
+                    ));
                 }
             }
 
-            Ok(Type::Int) 
+            Ok(Type::Int)
         }
-        Expr::Ask { target, message, args } => {
+        Expr::Ask {
+            target,
+            message,
+            args,
+        } => {
             // Check: ask() can only be used in IO context
             if !is_io_context {
-                return Err("Cannot use 'ask' in a pure function. Use 'io fun' instead.".to_string());
+                return Err(
+                    "Cannot use 'ask' in a pure function. Use 'io fun' instead.".to_string()
+                );
             }
-            
+
             analyze_expr(target, symbols, is_io_context)?;
             analyze_expr(message, symbols, is_io_context)?;
             for arg in args {

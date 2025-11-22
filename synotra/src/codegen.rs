@@ -1,8 +1,8 @@
-use crate::ast::*;
-use crate::ir::*;
 use crate::ast::BinaryOp;
-use crate::ir::Terminator;
+use crate::ast::*;
 use crate::ir::Instruction;
+use crate::ir::Terminator;
+use crate::ir::*;
 use std::collections::HashMap;
 
 pub struct Codegen {
@@ -24,7 +24,7 @@ impl Codegen {
         }
     }
 
-    fn get_or_alloc_local(&mut self, name: &str) -> usize {
+    pub fn get_or_alloc_local(&mut self, name: &str) -> usize {
         if let Some(&id) = self.locals_map.get(name) {
             id
         } else {
@@ -46,7 +46,9 @@ impl Codegen {
             Value::Local(idx) => idx,
             _ => {
                 let idx = self.alloc_temp();
-                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx, val));
                 idx
             }
         }
@@ -71,16 +73,16 @@ impl Codegen {
         });
         idx
     }
-    
+
     fn switch_to_block(&mut self, idx: usize) {
         self.current_block_idx = idx;
     }
 
-    fn current_block_mut(&mut self) -> &mut BasicBlock {
+    pub fn current_block_mut(&mut self) -> &mut BasicBlock {
         &mut self.blocks[self.current_block_idx]
     }
 
-    pub fn generate(mut self, func: &FunctionDef) -> IrHandler {
+    pub fn generate(mut self, func: &FunctionDef, actor_fields: &[FieldDef]) -> IrHandler {
         // Register params as locals first
         for p in &func.params {
             self.get_or_alloc_local(&p.name);
@@ -88,25 +90,41 @@ impl Codegen {
 
         // Create entry block
         self.new_block();
-        
+
+        // Initialize actor fields at the start of each handler
+        for field in actor_fields {
+            let field_local = self.get_or_alloc_local(&field.name);
+            let init_val = self.gen_expr(&field.init);
+            self.current_block_mut()
+                .instrs
+                .push(Instruction::Assign(field_local, init_val));
+        }
+
         for stmt in &func.body.stmts {
             self.gen_stmt(stmt);
         }
-        
+
         // Ensure terminator
-        if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+        if matches!(
+            self.current_block_mut().terminator,
+            Terminator::Jump(999999)
+        ) {
             // If this is the 'run' handler of the 'main' actor, append an Exit instruction
             // This allows the user to omit explicit exit() calls
             if self.current_actor == "main" && func.name == "run" {
                 self.current_block_mut().instrs.push(Instruction::Exit);
             }
-            
+
             self.current_block_mut().terminator = Terminator::Return(None);
         }
 
         IrHandler {
             name: func.name.clone(),
-            params: func.params.iter().map(|p| (p.name.clone(), format!("{:?}", p.ty))).collect(),
+            params: func
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), format!("{:?}", p.ty)))
+                .collect(),
             local_count: self.next_local_id,
             blocks: self.blocks.clone(),
         }
@@ -117,26 +135,32 @@ impl Codegen {
             Stmt::Let(name, _, expr) => {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
-                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx, val));
             }
             Stmt::Var(name, _, expr) => {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
-                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx, val));
             }
             Stmt::Assign(name, expr) => {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
-                self.current_block_mut().instrs.push(Instruction::Assign(idx, val));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx, val));
             }
             Stmt::AssignIndex(name, index, value) => {
                 let collection_idx = self.get_or_alloc_local(name);
                 let index_val = self.gen_expr(index);
                 let value_val = self.gen_expr(value);
-                
+
                 let index_idx = self.value_to_local_idx(index_val);
                 let value_idx = self.value_to_local_idx(value_val);
-                
+
                 self.current_block_mut().instrs.push(Instruction::SwStore {
                     collection: collection_idx,
                     index: index_idx,
@@ -157,7 +181,11 @@ impl Codegen {
                 // Create a dead block to catch subsequent instructions
                 self.new_block();
             }
-            Stmt::Send { target, message, args } => {
+            Stmt::Send {
+                target,
+                message,
+                args,
+            } => {
                 let target_val = self.gen_expr(target);
                 let msg_val = self.gen_expr(message);
                 let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
@@ -175,8 +203,13 @@ impl Codegen {
                 let merge_idx = self.new_block_index();
 
                 // Jump from current
-                let false_target = if else_block.is_some() { else_idx } else { merge_idx };
-                self.current_block_mut().terminator = Terminator::JumpCond(cond_val, then_idx, false_target);
+                let false_target = if else_block.is_some() {
+                    else_idx
+                } else {
+                    merge_idx
+                };
+                self.current_block_mut().terminator =
+                    Terminator::JumpCond(cond_val, then_idx, false_target);
 
                 // Then block
                 self.switch_to_block(then_idx);
@@ -184,7 +217,10 @@ impl Codegen {
                     self.gen_stmt(s);
                 }
                 // Jump to merge if no explicit return
-                if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+                if matches!(
+                    self.current_block_mut().terminator,
+                    Terminator::Jump(999999)
+                ) {
                     self.current_block_mut().terminator = Terminator::Jump(merge_idx);
                 }
 
@@ -195,7 +231,10 @@ impl Codegen {
                         self.gen_stmt(s);
                     }
                     // Jump to merge if no explicit return
-                    if matches!(self.current_block_mut().terminator, Terminator::Jump(999999)) {
+                    if matches!(
+                        self.current_block_mut().terminator,
+                        Terminator::Jump(999999)
+                    ) {
                         self.current_block_mut().terminator = Terminator::Jump(merge_idx);
                     }
                 }
@@ -214,7 +253,8 @@ impl Codegen {
                 // Header: check condition
                 self.switch_to_block(header_idx);
                 let cond_val = self.gen_expr(cond);
-                self.current_block_mut().terminator = Terminator::JumpCond(cond_val, body_idx, exit_idx);
+                self.current_block_mut().terminator =
+                    Terminator::JumpCond(cond_val, body_idx, exit_idx);
 
                 // Body
                 self.switch_to_block(body_idx);
@@ -234,7 +274,9 @@ impl Codegen {
                 // Init
                 let start_val = self.gen_expr(start);
                 let iter_idx = self.get_or_alloc_local(iter);
-                self.current_block_mut().instrs.push(Instruction::Assign(iter_idx, start_val));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(iter_idx, start_val));
 
                 let header_idx = self.new_block_index();
                 let body_idx = self.new_block_index();
@@ -244,7 +286,7 @@ impl Codegen {
 
                 // Header: iter < end
                 self.switch_to_block(header_idx);
-                let end_val = self.gen_expr(end); 
+                let end_val = self.gen_expr(end);
                 // For simplicity re-eval end expression (might be side-effecty, but usually const/var).
                 // Better: var _end = end;
                 // Let's stick to simple re-eval or assume it's a var/const for now.
@@ -255,9 +297,10 @@ impl Codegen {
                     result: cond_res,
                     op: "lt".to_string(),
                     lhs: iter_val.clone(),
-                    rhs: end_val
+                    rhs: end_val,
                 });
-                self.current_block_mut().terminator = Terminator::JumpCond(Value::Local(cond_res), body_idx, exit_idx);
+                self.current_block_mut().terminator =
+                    Terminator::JumpCond(Value::Local(cond_res), body_idx, exit_idx);
 
                 // Body
                 self.switch_to_block(body_idx);
@@ -273,7 +316,9 @@ impl Codegen {
                     lhs: Value::Local(iter_idx),
                     rhs: Value::ConstInt(1),
                 });
-                self.current_block_mut().instrs.push(Instruction::Assign(iter_idx, Value::Local(inc_res)));
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(iter_idx, Value::Local(inc_res)));
 
                 self.current_block_mut().terminator = Terminator::Jump(header_idx);
 
@@ -284,7 +329,7 @@ impl Codegen {
         }
     }
 
-    fn gen_expr(&mut self, expr: &Expr) -> Value {
+    pub fn gen_expr(&mut self, expr: &Expr) -> Value {
         match expr {
             Expr::Literal(lit) => match lit {
                 Literal::Int(i) => Value::ConstInt(*i),
@@ -294,7 +339,7 @@ impl Codegen {
             Expr::Variable(name) => {
                 let idx = self.get_or_alloc_local(name);
                 Value::Local(idx)
-            },
+            }
             Expr::BinaryOp(lhs, op, rhs) => {
                 let l = self.gen_expr(lhs);
                 let r = self.gen_expr(rhs);
@@ -324,10 +369,10 @@ impl Codegen {
             Expr::Index(target, index) => {
                 let target_val = self.gen_expr(target);
                 let index_val = self.gen_expr(index);
-                
+
                 let collection_idx = self.value_to_local_idx(target_val);
                 let index_idx = self.value_to_local_idx(index_val);
-                
+
                 let res = self.alloc_temp();
                 self.current_block_mut().instrs.push(Instruction::SwLoad {
                     result: res,
@@ -353,12 +398,12 @@ impl Codegen {
 
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let res = self.alloc_temp();
-                
+
                 // Check if IO or Pure (simplified)
                 // In real impl, we check symbol table. Assuming Pure for now unless "print"
                 let func_name = method.clone();
                 if func_name == "print" || func_name == "println" {
-                     self.current_block_mut().instrs.push(Instruction::CallIo {
+                    self.current_block_mut().instrs.push(Instruction::CallIo {
                         result: res,
                         func: func_name,
                         args: arg_vals,
@@ -368,28 +413,32 @@ impl Codegen {
                     // Exit doesn't return, but we need a value for the expression
                     // In a real compiler we'd handle this better (e.g. bottom type)
                 } else {
-                     self.current_block_mut().instrs.push(Instruction::CallPure {
+                    self.current_block_mut().instrs.push(Instruction::CallPure {
                         result: res,
                         func: func_name,
                         args: arg_vals,
                     });
                 }
-               
+
                 Value::Local(res)
             }
-            Expr::Ask { target, message, args } => {
+            Expr::Ask {
+                target,
+                message,
+                args,
+            } => {
                 let target_val = self.gen_expr(target);
                 let msg_val = self.gen_expr(message);
                 let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
                 let res = self.alloc_temp();
-                
+
                 self.current_block_mut().instrs.push(Instruction::Ask {
                     result: res,
                     target: target_val,
                     msg: msg_val,
                     args: arg_vals,
                 });
-                
+
                 Value::Local(res)
             }
         }
