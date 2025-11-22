@@ -396,11 +396,49 @@ impl Codegen {
                     }
                 }
 
+                // Check if this is a collection method
+                let collection_methods = [
+                    "add",
+                    "get",
+                    "size",
+                    "isEmpty",
+                    "put",
+                    "remove",
+                    "containsKey",
+                    "contains",
+                ];
+
+                if collection_methods.contains(&method.as_str()) {
+                    // Collection method call - requires target to be a local variable (or temp)
+                    let target_val = self.gen_expr(target);
+
+                    if let Value::Local(target_idx) = target_val {
+                        let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
+                        let res = self.alloc_temp();
+
+                        self.current_block_mut()
+                            .instrs
+                            .push(Instruction::CallMethod {
+                                result: res,
+                                target: target_idx,
+                                method: method.clone(),
+                                args: arg_vals,
+                            });
+                        return Value::Local(res);
+                    } else {
+                        // If target is not a local (e.g. constant or future), we can't mutate it easily via CallMethod
+                        // For now, assume target is always resolved to a Local by gen_expr
+                        // If gen_expr returns a Const, we can't mutate it anyway.
+                        println!("Warning: Collection method called on non-local value");
+                    }
+                }
+
+                // Generate target value (for instance methods)
+                let _ = self.gen_expr(target); // Evaluate target for side effects if any, but we don't use it for pure calls
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let res = self.alloc_temp();
 
                 // Check if IO or Pure (simplified)
-                // In real impl, we check symbol table. Assuming Pure for now unless "print"
                 let func_name = method.clone();
                 if func_name == "print" || func_name == "println" {
                     self.current_block_mut().instrs.push(Instruction::CallIo {
@@ -410,8 +448,6 @@ impl Codegen {
                     });
                 } else if func_name == "exit" {
                     self.current_block_mut().instrs.push(Instruction::Exit);
-                    // Exit doesn't return, but we need a value for the expression
-                    // In a real compiler we'd handle this better (e.g. bottom type)
                 } else {
                     self.current_block_mut().instrs.push(Instruction::CallPure {
                         result: res,

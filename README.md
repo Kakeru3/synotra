@@ -43,7 +43,6 @@ cd syvm
 cargo run --release -- ../example/your_program.syi
 ```
 
-
 ## Language Syntax
 
 Synotra uses Kotlin-like syntax with explicit actor definitions:
@@ -94,6 +93,7 @@ cargo run --release --bin syvm -- example/fib_parallel_100x.syi
 ```
 
 **Performance:**
+
 - Sequential (300 iterations): ~1.37s
 - Parallel (3 workers × 100 iterations): ~1.01s
 - **Speedup: 26% faster with multi-core execution!**
@@ -142,7 +142,7 @@ synotra/
 .sy source → Lexer → Parser → AST → Semantic Analysis → IR (.syi) → VM
 ```
 
-###Multi-Core Runtime
+### Multi-Core Runtime
 
 - **Tokio Multi-Threaded Runtime**: 8 worker threads
 - **Spawn Blocking**: Actors run on OS threads for true parallelism
@@ -183,13 +183,35 @@ cargo run --release --bin syvm -- ../example/fib_parallel_100x.syi
 
 ## Roadmap
 
-- [ ] `send()` instruction for inter-actor messaging
-- [ ] `ask()` pattern for request/response
-- [ ] CRDT state support
+### ✅ Completed
+
+- [x] `send()` instruction for inter-actor messaging
+- [x] `ask()` pattern for request/response (async with futures)
+- [x] Function definitions and calls (local functions)
+- [x] Collections (Single Writer: `List<T>`, `MutableMap<K,V>`, `MutableSet<T>`)
+- [x] String interpolation with expression support
+- [x] Actor-level field declarations (`var`/`val`)
+- [x] IO safety checks (compile-time enforcement)
+- [x] Control flow (`if`/`else`, `while`, `for..in`)
+- [x] Import statements with generics
+
+### 🚧 In Progress
+
+- [x] Collections (List, Map, Set)
+  - [x] Single Writer (SW) support
+  - [x] Collection methods (add, get, size, etc.)
+- [ ] Type Inference Improvements
+- [ ] Mutable List support (set index)
+
+### 📋 Planned
+
+- [ ] CRDT state support for distributed consistency
 - [ ] Pattern matching
-- [ ] Function definitions and calls
-- [ ] Collections (lists, maps)
-- [ ] String interpolation
+- [ ] Struct/Class definitions beyond message types
+- [ ] More collection types (immutable variants)
+- [ ] Network distribution (remote actors)
+- [ ] Persistence and snapshots
+- [ ] Debugging tools and REPL
 
 ## License
 

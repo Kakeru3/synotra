@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
@@ -17,7 +17,7 @@ pub struct IrActor {
 pub struct IrHandler {
     pub name: String,
     pub params: Vec<(String, String)>, // Name, Type
-    pub local_count: usize, // Number of local variables
+    pub local_count: usize,            // Number of local variables
     pub blocks: Vec<BasicBlock>,
 }
 
@@ -45,6 +45,12 @@ pub enum Instruction {
     CallIo {
         result: usize, // Local index
         func: String,
+        args: Vec<Value>,
+    },
+    CallMethod {
+        result: usize, // Local index
+        target: usize, // Local index of the object (collection)
+        method: String,
         args: Vec<Value>,
     },
     Send {
@@ -84,7 +90,7 @@ pub enum Value {
     ConstString(String),
     ConstBool(bool),
     Local(usize), // Local variable index
-    
+
     // Collections
     List(Vec<Value>),
     Map(HashMap<Value, Value>),

@@ -1,0 +1,46 @@
+import std.collections.List<Int>
+import std.collections.MutableMap<String, Int>
+import std.collections.MutableSet<String>
+
+class Start()
+
+actor main(name: String) {
+    io fun run(msg: Start) {
+        // Test List methods
+        var list: List<Int> = List.new()
+        list.add(10)
+        list.add(20)
+        list.add(30)
+        
+        println("List size: ${list.size()}")
+        println("List[0]: ${list.get(0)}")
+        println("List[1]: ${list.get(1)}")
+        println("List isEmpty: ${list.isEmpty()}")
+        
+        // Test Map methods
+        var map: MutableMap<String, Int> = MutableMap.new()
+        map.put("apple", 100)
+        map.put("banana", 200)
+        
+        println("Map size: ${map.size()}")
+        println("Map get apple: ${map.get(\"apple\")}")
+        println("Map contains apple: ${map.containsKey(\"apple\")}")
+        println("Map contains orange: ${map.containsKey(\"orange\")}")
+        
+        map.remove("apple")
+        println("After remove, size: ${map.size()}")
+        
+        // Test Set methods
+        var set: MutableSet<String> = MutableSet.new()
+        set.add("red")
+        set.add("blue")
+        set.add("red")
+        
+        println("Set size: ${set.size()}")
+        println("Set contains red: ${set.contains(\"red\")}")
+        println("Set contains green: ${set.contains(\"green\")}")
+        
+        set.remove("red")
+        println("After remove, contains red: ${set.contains(\"red\")}")
+    }
+}

@@ -82,6 +82,43 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                     return Err("Expected ']'".to_string());
                 }
             }
+            Token::Dot => {
+                *pos += 1; // Skip '.'
+                if *pos < tokens.len() {
+                    if let Token::Ident(method_name) = &tokens[*pos] {
+                        *pos += 1; // Skip method name
+
+                        // Check for arguments
+                        if *pos < tokens.len() && tokens[*pos] == Token::LParen {
+                            *pos += 1; // Skip '('
+                            let mut args = Vec::new();
+                            if *pos < tokens.len() && tokens[*pos] != Token::RParen {
+                                loop {
+                                    args.push(parse_comparison(tokens, pos)?);
+                                    if *pos < tokens.len() && tokens[*pos] == Token::Comma {
+                                        *pos += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if *pos < tokens.len() && tokens[*pos] == Token::RParen {
+                                *pos += 1; // Skip ')'
+                                expr = Expr::Call(Box::new(expr), method_name.clone(), args);
+                            } else {
+                                return Err("Expected ')'".to_string());
+                            }
+                        } else {
+                            return Err("Expected '(' after method name".to_string());
+                        }
+                    } else {
+                        return Err("Expected method name after '.'".to_string());
+                    }
+                } else {
+                    return Err("Unexpected end after '.'".to_string());
+                }
+            }
             _ => break,
         }
     }

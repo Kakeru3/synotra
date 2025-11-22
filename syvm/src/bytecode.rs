@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrProgram {
@@ -15,7 +15,7 @@ pub struct IrActor {
 pub struct IrHandler {
     pub name: String,
     pub params: Vec<(String, String)>, // Name, Type
-    pub local_count: usize, // Number of local variables
+    pub local_count: usize,            // Number of local variables
     pub blocks: Vec<BasicBlock>,
 }
 
@@ -43,6 +43,12 @@ pub enum Instruction {
     CallIo {
         result: usize, // Local index
         func: String,
+        args: Vec<Value>,
+    },
+    CallMethod {
+        result: usize, // Local index
+        target: usize, // Local index of the object (collection)
+        method: String,
         args: Vec<Value>,
     },
     Send {
@@ -76,11 +82,11 @@ pub enum Terminator {
     JumpCond(Value, usize, usize), // cond, true_block, false_block
 }
 
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::Receiver;
-use serde::{Serializer, Deserializer};
+use serde::{Deserializer, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum FutureState {
@@ -107,14 +113,18 @@ impl Hash for RuntimeFuture {
 
 impl Serialize for RuntimeFuture {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         serializer.serialize_none()
     }
 }
 
 impl<'de> Deserialize<'de> for RuntimeFuture {
     fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where D: Deserializer<'de> {
+    where
+        D: Deserializer<'de>,
+    {
         use serde::de::Error;
         Err(D::Error::custom("RuntimeFuture cannot be deserialized"))
     }
@@ -128,7 +138,7 @@ pub enum Value {
     Local(usize), // Local variable index
     #[serde(skip)]
     Future(RuntimeFuture),
-    
+
     // Collections
     List(Vec<Value>),
     Map(HashMap<Value, Value>),
