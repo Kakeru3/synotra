@@ -22,7 +22,7 @@ BASE_NAME="${SY_FILE%.sy}"
 SYI_FILE="${BASE_NAME}.syi"
 
 echo "==> Compiling $SY_FILE..."
-./target/release/synotra "$SY_FILE" > "$SYI_FILE"
+./target/release/synotra "$SY_FILE"
 
 echo "==> Running $SYI_FILE..."
 cd syvm

@@ -25,17 +25,17 @@ fn main() {
 
     let lexer = Token::lexer(&code);
     let tokens: Vec<_> = lexer.filter_map(|t| t.ok()).collect(); // TODO: Handle errors
-    println!("Tokens: {:?}", tokens);
+                                                                 // println!("Tokens: {:?}", tokens);
 
     let parser = parser::parser();
     let result = parser.parse(tokens);
 
     match result {
         Ok(program) => {
-            println!("{:#?}", program);
+            // println!("{:#?}", program);
             match sema::analyze(&program) {
                 Ok(_) => {
-                    println!("Semantic analysis passed");
+                    // println!("Semantic analysis passed");
                     use ast::{ActorMember, Definition};
                     use codegen::Codegen;
                     use ir::{IrActor, IrProgram};
@@ -67,7 +67,7 @@ fn main() {
                     }
 
                     let json = serde_json::to_string_pretty(&ir_program).unwrap();
-                    println!("IR Output:\n{}", json);
+                    // println!("IR Output:\n{}", json);
 
                     // Write to .syi file (support both .sy and .syo extensions)
                     let output_path = if args.input.ends_with(".sy") {
@@ -77,12 +77,12 @@ fn main() {
                     };
                     fs::write(output_path, json).expect("Failed to write IR file");
                 }
-                Err(e) => println!("Semantic error: {}", e),
+                Err(e) => eprintln!("Semantic error: {}", e),
             }
         }
         Err(errs) => {
             for err in errs {
-                println!("Parse error: {:?}", err);
+                eprintln!("Parse error: {:?}", err);
             }
         }
     }

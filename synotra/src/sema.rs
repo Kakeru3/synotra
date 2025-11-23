@@ -203,17 +203,21 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             }
             symbols.insert(name.clone(), Symbol::Variable(expr_ty, false));
         }
-        Stmt::Var(name, ty_opt, expr) => {
-            let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
-            if let Some(expected_ty) = ty_opt {
-                if !check_type_compatibility(expected_ty, &expr_ty) {
+        Stmt::Var(name, ty_opt, init) => {
+            let init_ty = analyze_expr(init, symbols, is_io_context)?;
+            let var_ty = if let Some(ty) = ty_opt {
+                if init_ty != *ty {
                     return Err(format!(
-                        "Type mismatch for variable '{}': expected {:?}, found {:?}",
-                        name, expected_ty, expr_ty
+                        "Type mismatch in variable declaration: expected {:?}, got {:?}",
+                        ty, init_ty
                     ));
                 }
-            }
-            symbols.insert(name.clone(), Symbol::Variable(expr_ty, true));
+                ty.clone()
+            } else {
+                init_ty
+            };
+            // println!("DEBUG: Defining variable '{}' with type {:?}", name, var_ty);
+            symbols.insert(name.clone(), Symbol::Variable(var_ty, true));
         }
         Stmt::Assign(name, expr) => {
             // Check variable exists and is mutable
@@ -323,6 +327,32 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             }
             symbols.exit_scope();
         }
+        Stmt::ForEach(iter, collection, body) => {
+            let collection_ty = analyze_expr(collection, symbols, is_io_context)?;
+            let item_ty = match collection_ty {
+                Type::Generic(name, args) if name == "List" || name == "Set" => {
+                    if args.len() >= 1 {
+                        args[0].clone()
+                    } else {
+                        return Err("Collection must have a type argument".to_string());
+                    }
+                }
+                Type::Generic(name, _) if name == "Map" => {
+                    return Err(
+                        "Cannot iterate over Map directly. Use map.keys() or map.values()"
+                            .to_string(),
+                    );
+                }
+                _ => return Err(format!("Cannot iterate over type {:?}", collection_ty)),
+            };
+
+            symbols.enter_scope();
+            symbols.insert(iter.clone(), Symbol::Variable(item_ty, false));
+            for s in &body.stmts {
+                analyze_stmt(s, symbols, is_io_context)?;
+            }
+            symbols.exit_scope();
+        }
     }
     Ok(())
 }
@@ -378,7 +408,16 @@ fn analyze_expr(
                 analyze_expr(arg, symbols, is_io_context)?;
             }
 
-            // Special handling for constructors
+            // Check if it's a method call on a variable
+            if let Expr::Variable(var_name) = target.as_ref() {
+                if let Some(Symbol::Variable(ty, _)) = symbols.lookup(var_name) {
+                    // eprintln!(
+                    //     "DEBUG: Method call '{}' on variable '{}' with type {:?}",
+                    //     method, var_name, ty
+                    // );
+                }
+            }
+
             if let Expr::Variable(name) = target.as_ref() {
                 if method == "new" {
                     if name == "List" {
@@ -504,10 +543,39 @@ fn analyze_expr(
                             _ => {}
                         }
                     } else if name == "Set" {
+                        // println!("DEBUG: Analyzing Set method '{}'", method);
                         match method.as_str() {
-                            "add" | "remove" | "contains" => return Ok(Type::Bool),
+                            "add" => {
+                                // Infer element type if currently Unknown
+                                if type_args.len() >= 1 {
+                                    if let Type::Unknown = type_args[0] {
+                                        if let Some(arg) = args.get(0) {
+                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                            if let Expr::Variable(var_name) = target.as_ref() {
+                                                let new_ty = Type::Generic(
+                                                    name.clone(),
+                                                    vec![arg_ty.clone()],
+                                                );
+                                                symbols.update(
+                                                    var_name,
+                                                    Symbol::Variable(new_ty, true),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                return Ok(Type::Bool);
+                            }
+                            "remove" | "contains" | "addAll" | "clear" => return Ok(Type::Bool),
                             "size" => return Ok(Type::Int),
-                            "addAll" | "clear" => return Ok(Type::Bool),
+                            "values" => {
+                                if type_args.len() >= 1 {
+                                    return Ok(Type::Generic(
+                                        "List".to_string(),
+                                        vec![type_args[0].clone()],
+                                    ));
+                                }
+                            }
                             _ => {}
                         }
                     }

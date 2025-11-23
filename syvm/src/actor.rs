@@ -358,6 +358,30 @@ impl Actor {
                                         }
                                     }
                                     "size" => Value::ConstInt(set.len() as i64),
+                                    "values" => {
+                                        let mut vals = Vec::new();
+                                        for v in &set {
+                                            vals.push(v.clone());
+                                        }
+                                        Value::List(vals)
+                                    }
+                                    "addAll" => {
+                                        if let Some(Value::Set(other)) = arg_vals.get(0) {
+                                            set.extend(other.clone());
+                                            locals[*target] = Value::Set(set);
+                                            Value::ConstBool(true)
+                                        } else {
+                                            eprintln!(
+                                                "Runtime Error: Set.addAll requires a Set argument"
+                                            );
+                                            Value::ConstBool(false)
+                                        }
+                                    }
+                                    "clear" => {
+                                        set.clear();
+                                        locals[*target] = Value::Set(set);
+                                        Value::ConstBool(true)
+                                    }
                                     _ => {
                                         eprintln!("Runtime Error: Unknown Set method '{}'", method);
                                         Value::ConstInt(0)

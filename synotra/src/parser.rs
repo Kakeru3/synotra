@@ -484,11 +484,23 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .ignore_then(ident)
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .then_ignore(just(Token::Range))
-            .then(expr.clone())
-            .then_ignore(just(Token::RParen))
+            .then(choice((
+                // Range loop: .. end )
+                just(Token::Range)
+                    .ignore_then(expr.clone())
+                    .then_ignore(just(Token::RParen))
+                    .map(|end| Some(end)),
+                // Collection loop: )
+                just(Token::RParen).map(|_| None),
+            )))
             .then(block.clone())
-            .map(|(((iter, start), end), body)| Stmt::For(iter, start, end, body));
+            .map(|(((iter, start_or_collection), end_opt), body)| {
+                if let Some(end) = end_opt {
+                    Stmt::For(iter, start_or_collection, end, body)
+                } else {
+                    Stmt::ForEach(iter, start_or_collection, body)
+                }
+            });
 
         let assign_stmt = ident
             .clone()

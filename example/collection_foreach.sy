@@ -1,0 +1,30 @@
+actor main(env: Env) {
+  io fun run() {
+    // List iteration
+    var list = List.new()
+    list.add(10)
+    list.add(20)
+    list.add(30)
+
+    println("Iterating List with for-each:")
+    for (item in list) {
+      println("Item: ${item}")
+    }
+
+    // Map keys iteration
+    var map = MutableMap.new()
+    map.put("a", 1)
+    map.put("b", 2)
+
+    println("Iterating Map keys with for-each:")
+    for (key in map.keys()) {
+      println("Key: ${key}")
+    }
+
+    // Map values iteration
+    println("Iterating Map values with for-each:")
+    for (v in map.values()) {
+      println("Value: ${v}")
+    }
+  }
+}

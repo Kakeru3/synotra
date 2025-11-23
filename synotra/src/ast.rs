@@ -68,7 +68,7 @@ pub struct ModuleDef {
     pub functions: Vec<FunctionDef>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
     String,
@@ -98,7 +98,8 @@ pub enum Stmt {
     },
     If(Expr, Block, Option<Block>),
     While(Expr, Block),
-    For(String, Expr, Expr, Block), // iterator, start, end, body
+    For(String, Expr, Expr, Block), // for (i in start..end)
+    ForEach(String, Expr, Block),   // for (item in collection) // iterator, start, end, body
 }
 
 #[derive(Debug, Clone)]

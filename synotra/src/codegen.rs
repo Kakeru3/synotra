@@ -325,6 +325,84 @@ impl Codegen {
                 // Exit
                 self.switch_to_block(exit_idx);
             }
+            Stmt::ForEach(iter, collection, body) => {
+                // 1. Evaluate collection
+                let col_val = self.gen_expr(collection);
+                let col_idx = self.value_to_local_idx(col_val);
+
+                // 2. Init index = 0
+                let idx_idx = self.alloc_temp();
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx_idx, Value::ConstInt(0)));
+
+                // 3. Get size
+                let len_res = self.alloc_temp();
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::CallMethod {
+                        result: len_res,
+                        target: col_idx,
+                        method: "size".to_string(),
+                        args: vec![],
+                    });
+                let len_val = Value::Local(len_res);
+
+                // 4. Loop Header
+                let header_idx = self.new_block_index();
+                let body_idx = self.new_block_index();
+                let exit_idx = self.new_block_index();
+
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Header: idx < len
+                self.switch_to_block(header_idx);
+                let cond_res = self.alloc_temp();
+                self.current_block_mut().instrs.push(Instruction::BinOp {
+                    result: cond_res,
+                    op: "lt".to_string(),
+                    lhs: Value::Local(idx_idx),
+                    rhs: len_val.clone(),
+                });
+                self.current_block_mut().terminator =
+                    Terminator::JumpCond(Value::Local(cond_res), body_idx, exit_idx);
+
+                // Body
+                self.switch_to_block(body_idx);
+
+                // var iter = col.get(idx)
+                let iter_local = self.get_or_alloc_local(iter);
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::CallMethod {
+                        result: iter_local,
+                        target: col_idx,
+                        method: "get".to_string(),
+                        args: vec![Value::Local(idx_idx)],
+                    });
+
+                // Body stmts
+                for s in &body.stmts {
+                    self.gen_stmt(s);
+                }
+
+                // Increment index
+                let inc_res = self.alloc_temp();
+                self.current_block_mut().instrs.push(Instruction::BinOp {
+                    result: inc_res,
+                    op: "add".to_string(),
+                    lhs: Value::Local(idx_idx),
+                    rhs: Value::ConstInt(1),
+                });
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::Assign(idx_idx, Value::Local(inc_res)));
+
+                self.current_block_mut().terminator = Terminator::Jump(header_idx);
+
+                // Exit
+                self.switch_to_block(exit_idx);
+            }
             _ => {}
         }
     }
