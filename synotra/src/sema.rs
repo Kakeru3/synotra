@@ -43,6 +43,38 @@ impl SymbolTable {
         }
         None
     }
+    pub fn update(&mut self, name: &str, new_symbol: Symbol) -> bool {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), new_symbol);
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn check_type_compatibility(expected: &Type, actual: &Type) -> bool {
+    match (expected, actual) {
+        (Type::Unknown, _) => true,
+        (_, Type::Unknown) => true,
+        (Type::Int, Type::Int) => true,
+        (Type::String, Type::String) => true,
+        (Type::Bool, Type::Bool) => true,
+        (Type::UserDefined(n1), Type::UserDefined(n2)) => n1 == n2,
+        (Type::Generic(n1, args1), Type::Generic(n2, args2)) => {
+            if n1 != n2 || args1.len() != args2.len() {
+                return false;
+            }
+            for (a1, a2) in args1.iter().zip(args2.iter()) {
+                if !check_type_compatibility(a1, a2) {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => false,
+    }
 }
 
 pub fn analyze(program: &Program) -> Result<(), String> {
@@ -159,12 +191,28 @@ fn analyze_function(func: &FunctionDef, symbols: &mut SymbolTable) -> Result<(),
 
 fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> Result<(), String> {
     match stmt {
-        Stmt::Let(name, _ty, expr) => {
+        Stmt::Let(name, ty_opt, expr) => {
             let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
+            if let Some(expected_ty) = ty_opt {
+                if !check_type_compatibility(expected_ty, &expr_ty) {
+                    return Err(format!(
+                        "Type mismatch for variable '{}': expected {:?}, found {:?}",
+                        name, expected_ty, expr_ty
+                    ));
+                }
+            }
             symbols.insert(name.clone(), Symbol::Variable(expr_ty, false));
         }
-        Stmt::Var(name, _ty, expr) => {
+        Stmt::Var(name, ty_opt, expr) => {
             let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
+            if let Some(expected_ty) = ty_opt {
+                if !check_type_compatibility(expected_ty, &expr_ty) {
+                    return Err(format!(
+                        "Type mismatch for variable '{}': expected {:?}, found {:?}",
+                        name, expected_ty, expr_ty
+                    ));
+                }
+            }
             symbols.insert(name.clone(), Symbol::Variable(expr_ty, true));
         }
         Stmt::Assign(name, expr) => {
@@ -325,9 +373,146 @@ fn analyze_expr(
                 _ => Ok(Type::Int), // Fallback
             }
         }
-        Expr::Call(_target, method, args) => {
+        Expr::Call(target, method, args) => {
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
+            }
+
+            // Special handling for constructors
+            if let Expr::Variable(name) = target.as_ref() {
+                if method == "new" {
+                    if name == "List" {
+                        return Ok(Type::Generic("List".to_string(), vec![Type::Unknown]));
+                    } else if name == "MutableMap" {
+                        return Ok(Type::Generic(
+                            "Map".to_string(),
+                            vec![Type::Unknown, Type::Unknown],
+                        ));
+                    } else if name == "MutableSet" {
+                        return Ok(Type::Generic("Set".to_string(), vec![Type::Unknown]));
+                    }
+                }
+            }
+
+            // Special case: parser generates Call(Variable("self"), method_name, args) for global functions
+            // like println(...). In this case, we don't actually have a 'self' variable.
+            let is_global_function = if let Expr::Variable(name) = target.as_ref() {
+                name == "self"
+            } else {
+                false
+            };
+
+            // Analyze target type (skip if it's a global function call)
+            let target_ty = if is_global_function {
+                Type::Unknown // Placeholder, won't be used
+            } else {
+                analyze_expr(target, symbols, is_io_context)?
+            };
+
+            // Collection method inference
+            match &target_ty {
+                Type::Generic(name, type_args) => {
+                    if name == "List" {
+                        match method.as_str() {
+                            "get" => {
+                                if type_args.len() >= 1 {
+                                    return Ok(type_args[0].clone());
+                                }
+                            }
+                            "add" => {
+                                if type_args.len() >= 1 {
+                                    if let Type::Unknown = type_args[0] {
+                                        if let Some(arg) = args.get(0) {
+                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                            if let Expr::Variable(var_name) = target.as_ref() {
+                                                let new_ty = Type::Generic(
+                                                    name.clone(),
+                                                    vec![arg_ty.clone()],
+                                                );
+                                                symbols.update(
+                                                    var_name,
+                                                    Symbol::Variable(new_ty, true),
+                                                ); // Assuming mutable
+                                            }
+                                        }
+                                    }
+                                }
+                                return Ok(Type::Bool);
+                            }
+                            "size" => return Ok(Type::Int),
+                            "isEmpty" => return Ok(Type::Bool),
+                            "addAll" | "clear" => return Ok(Type::Bool),
+                            _ => {}
+                        }
+                    } else if name == "Map" {
+                        match method.as_str() {
+                            "get" => {
+                                if type_args.len() >= 2 {
+                                    return Ok(type_args[1].clone());
+                                }
+                            }
+                            "keys" => {
+                                if type_args.len() >= 2 {
+                                    return Ok(Type::Generic(
+                                        "List".to_string(),
+                                        vec![type_args[0].clone()],
+                                    ));
+                                }
+                            }
+                            "values" => {
+                                if type_args.len() >= 2 {
+                                    return Ok(Type::Generic(
+                                        "List".to_string(),
+                                        vec![type_args[1].clone()],
+                                    ));
+                                }
+                            }
+                            "put" => {
+                                // Infer key and value types if currently Unknown
+                                if type_args.len() >= 2 {
+                                    let mut new_args = type_args.clone();
+                                    let mut changed = false;
+
+                                    if let Type::Unknown = type_args[0] {
+                                        if let Some(arg) = args.get(0) {
+                                            new_args[0] =
+                                                analyze_expr(arg, symbols, is_io_context)?;
+                                            changed = true;
+                                        }
+                                    }
+                                    if let Type::Unknown = type_args[1] {
+                                        if let Some(arg) = args.get(1) {
+                                            new_args[1] =
+                                                analyze_expr(arg, symbols, is_io_context)?;
+                                            changed = true;
+                                        }
+                                    }
+
+                                    if changed {
+                                        if let Expr::Variable(var_name) = target.as_ref() {
+                                            let new_ty = Type::Generic(name.clone(), new_args);
+                                            symbols
+                                                .update(var_name, Symbol::Variable(new_ty, true));
+                                        }
+                                    }
+                                }
+                                return Ok(Type::Bool);
+                            }
+                            "remove" | "containsKey" | "contains" => return Ok(Type::Bool),
+                            "size" => return Ok(Type::Int),
+                            "putAll" | "clear" => return Ok(Type::Bool),
+                            _ => {}
+                        }
+                    } else if name == "Set" {
+                        match method.as_str() {
+                            "add" | "remove" | "contains" => return Ok(Type::Bool),
+                            "size" => return Ok(Type::Int),
+                            "addAll" | "clear" => return Ok(Type::Bool),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
             }
 
             // Check if calling IO function from non-IO context

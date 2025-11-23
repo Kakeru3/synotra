@@ -206,6 +206,21 @@ impl Actor {
                                     }
                                     "size" => Value::ConstInt(list.len() as i64),
                                     "isEmpty" => Value::ConstBool(list.is_empty()),
+                                    "addAll" => {
+                                        if let Some(Value::List(other)) = arg_vals.get(0) {
+                                            list.extend(other.clone());
+                                            locals[*target] = Value::List(list);
+                                            Value::ConstBool(true)
+                                        } else {
+                                            eprintln!("Runtime Error: List.addAll requires a List argument");
+                                            Value::ConstBool(false)
+                                        }
+                                    }
+                                    "clear" => {
+                                        list.clear();
+                                        locals[*target] = Value::List(list);
+                                        Value::ConstBool(true)
+                                    }
                                     _ => {
                                         eprintln!(
                                             "Runtime Error: Unknown List method '{}'",
@@ -266,6 +281,39 @@ impl Actor {
                                             eprintln!("Runtime Error: Map.containsKey requires a key argument");
                                             Value::ConstBool(false)
                                         }
+                                    }
+                                    "keys" => {
+                                        let mut keys = Vec::new();
+                                        for k in map.keys() {
+                                            keys.push(k.clone());
+                                        }
+                                        Value::List(keys)
+                                    }
+                                    "values" => {
+                                        let mut vals = Vec::new();
+                                        for v in map.values() {
+                                            vals.push(v.clone());
+                                        }
+                                        Value::List(vals)
+                                    }
+                                    "putAll" | "addAll" => {
+                                        if let Some(Value::Map(other)) = arg_vals.get(0) {
+                                            for (k, v) in other {
+                                                map.insert(k.clone(), v.clone());
+                                            }
+                                            locals[*target] = Value::Map(map);
+                                            Value::ConstBool(true)
+                                        } else {
+                                            eprintln!(
+                                                "Runtime Error: Map.putAll requires a Map argument"
+                                            );
+                                            Value::ConstBool(false)
+                                        }
+                                    }
+                                    "clear" => {
+                                        map.clear();
+                                        locals[*target] = Value::Map(map);
+                                        Value::ConstBool(true)
                                     }
                                     _ => {
                                         eprintln!("Runtime Error: Unknown Map method '{}'", method);
@@ -523,8 +571,21 @@ impl Actor {
                         let val_val = self.resolve_value(&Value::Local(*value), &locals);
 
                         match &mut locals[*collection] {
-                            Value::List(_) => {
-                                eprintln!("Runtime Error: Cannot assign to immutable List");
+                            Value::List(list) => {
+                                if let Value::ConstInt(idx) = idx_val {
+                                    let idx = idx as usize;
+                                    if idx < list.len() {
+                                        list[idx] = val_val;
+                                    } else {
+                                        eprintln!(
+                                            "Runtime Error: List index out of bounds: {} (len: {})",
+                                            idx,
+                                            list.len()
+                                        );
+                                    }
+                                } else {
+                                    eprintln!("Runtime Error: List index must be an integer");
+                                }
                             }
                             Value::Map(map) => {
                                 map.insert(idx_val, val_val);
@@ -870,6 +931,12 @@ impl Actor {
                                         );
                                         locals[*result] = Value::ConstBool(false);
                                     }
+                                } else if method == "keys" {
+                                    let mut keys = Vec::new();
+                                    for k in map.keys() {
+                                        keys.push(k.clone());
+                                    }
+                                    locals[*result] = Value::List(keys);
                                 } else {
                                     eprintln!("Runtime Error: Unknown Map method '{}'", method);
                                     locals[*result] = Value::ConstInt(0);

@@ -1,0 +1,9 @@
+actor main(env: Env) {
+  io fun run() {
+    var list = List.new()
+    list.add(10)
+    
+    // Should fail: List<Int> vs String
+    var s: String = list.get(0)
+  }
+}

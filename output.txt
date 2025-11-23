@@ -1,0 +1,251 @@
+warning: virtual workspace defaulting to `resolver = "1"` despite one or more workspace members being on edition 2021 which implies `resolver = "2"`
+note: to keep the current resolver, specify `workspace.resolver = "1"` in the workspace root's manifest
+note: to use the edition 2021 resolver, specify `workspace.resolver = "2"` in the workspace root's manifest
+note: for more details see https://doc.rust-lang.org/cargo/reference/resolver.html#resolver-versions
+warning: variable does not need to be mutable
+   --> synotra/src/parser.rs:254:33
+    |
+254 | ...                   let mut lexer = LexToken::lexer(&expr_str);
+    |                           ----^^^^^
+    |                           |
+    |                           help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: unreachable pattern
+   --> synotra/src/codegen.rs:328:13
+    |
+328 |             _ => {}
+    |             ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> synotra/src/codegen.rs:328:13
+    |
+135 |             Stmt::Let(name, _, expr) => {
+    |             ------------------------ matches some of the same values
+...
+142 |             Stmt::Var(name, _, expr) => {
+    |             ------------------------ matches some of the same values
+...
+149 |             Stmt::Assign(name, expr) => {
+    |             ------------------------ matches some of the same values
+...
+156 |             Stmt::AssignIndex(name, index, value) => {
+    |             ------------------------------------- matches some of the same values
+...
+328 |             _ => {}
+    |             ^ ...and 6 other patterns collectively make this unreachable
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: unused variable: `ty`
+   --> synotra/src/sema.rs:247:38
+    |
+247 |                     Symbol::Variable(ty, is_mutable) => {
+    |                                      ^^ help: if this is intentional, prefix it with an underscore: `_ty`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: variant `Module` is never constructed
+  --> synotra/src/ast.rs:12:5
+   |
+ 7 | pub enum Definition {
+   |          ---------- variant in this enum
+...
+12 |     Module(ModuleDef),
+   |     ^^^^^^
+   |
+   = note: `Definition` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: fields `path` and `type_params` are never read
+  --> synotra/src/ast.rs:17:9
+   |
+16 | pub struct ImportDef {
+   |            --------- fields in this struct
+17 |     pub path: Vec<String>,        // e.g., ["std", "collections", "List"]
+   |         ^^^^
+18 |     pub type_params: Vec<String>, // e.g., ["T"] or ["K", "V"]
+   |         ^^^^^^^^^^^
+   |
+   = note: `ImportDef` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `is_crdt` and `is_io` are never read
+  --> synotra/src/ast.rs:46:9
+   |
+41 | pub struct FieldDef {
+   |            -------- fields in this struct
+...
+46 |     pub is_crdt: bool,
+   |         ^^^^^^^
+47 |     pub is_io: bool,
+   |         ^^^^^
+   |
+   = note: `FieldDef` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `params` is never read
+  --> synotra/src/ast.rs:53:9
+   |
+51 | pub struct MessageDef {
+   |            ---------- field in this struct
+52 |     pub name: String,
+53 |     pub params: Vec<Param>,
+   |         ^^^^^^
+   |
+   = note: `MessageDef` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `name` and `functions` are never read
+  --> synotra/src/ast.rs:67:9
+   |
+66 | pub struct ModuleDef {
+   |            --------- fields in this struct
+67 |     pub name: String,
+   |         ^^^^
+68 |     pub functions: Vec<FunctionDef>,
+   |         ^^^^^^^^^
+   |
+   = note: `ModuleDef` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Bool` is never constructed
+   --> synotra/src/ast.rs:122:5
+    |
+119 | pub enum Literal {
+    |          ------- variant in this enum
+...
+122 |     Bool(bool),
+    |     ^^^^
+    |
+    = note: `Literal` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `0` and `1` are never read
+  --> synotra/src/sema.rs:12:14
+   |
+12 |     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
+   |     -------- ^^^^^^^^^  ^^^^^^^^^^^^
+   |     |
+   |     fields in this variant
+   |
+   = note: `Symbol` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the fields to be of unit type to suppress this warning while preserving the field numbering, or remove the fields
+   |
+12 -     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
+12 +     Function((), (), bool), // Params, Return, is_io
+   |
+
+warning: field `0` is never read
+  --> synotra/src/sema.rs:13:11
+   |
+13 |     Actor(String),
+   |     ----- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `Symbol` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+13 -     Actor(String),
+13 +     Actor(()),
+   |
+
+warning: field `0` is never read
+  --> synotra/src/sema.rs:14:13
+   |
+14 |     Message(String),
+   |     ------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `Symbol` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+14 -     Message(String),
+14 +     Message(()),
+   |
+
+warning: `synotra` (bin "synotra") generated 12 warnings (run `cargo fix --bin "synotra"` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running `target/debug/synotra example/type_error.sy`
+Tokens: [Actor, Ident("main"), LParen, Ident("env"), Colon, Ident("Env"), RParen, LBrace, Io, Fun, Ident("run"), LParen, RParen, LBrace, Var, Ident("list"), Equals, Ident("List"), Dot, Ident("new"), LParen, RParen, Ident("list"), Dot, Ident("add"), LParen, Int(10), RParen, Var, Ident("s"), Colon, Ident("String"), Equals, Ident("list"), Dot, Ident("get"), LParen, Int(0), RParen, RBrace, RBrace]
+Program {
+    definitions: [
+        Actor(
+            ActorDef {
+                name: "main",
+                params: [
+                    Param {
+                        name: "env",
+                        ty: UserDefined(
+                            "Env",
+                        ),
+                    },
+                ],
+                members: [
+                    Method(
+                        FunctionDef {
+                            name: "run",
+                            params: [],
+                            return_type: None,
+                            body: Block {
+                                stmts: [
+                                    Var(
+                                        "list",
+                                        None,
+                                        Call(
+                                            Variable(
+                                                "List",
+                                            ),
+                                            "new",
+                                            [],
+                                        ),
+                                    ),
+                                    Expr(
+                                        Call(
+                                            Variable(
+                                                "list",
+                                            ),
+                                            "add",
+                                            [
+                                                Literal(
+                                                    Int(
+                                                        10,
+                                                    ),
+                                                ),
+                                            ],
+                                        ),
+                                    ),
+                                    Var(
+                                        "s",
+                                        Some(
+                                            String,
+                                        ),
+                                        Call(
+                                            Variable(
+                                                "list",
+                                            ),
+                                            "get",
+                                            [
+                                                Literal(
+                                                    Int(
+                                                        0,
+                                                    ),
+                                                ),
+                                            ],
+                                        ),
+                                    ),
+                                ],
+                            },
+                            is_io: true,
+                        },
+                    ),
+                ],
+            },
+        ),
+    ],
+}
+DEBUG: Call target type: Generic("List", [Unknown])
+DEBUG: In add, type_args: [Unknown]
+DEBUG: type_args[0] is Unknown
+DEBUG: arg_ty: Int
+DEBUG: Updating list to Generic("List", [Int])
+DEBUG: Call target type: Generic("List", [Int])
+DEBUG: Checking compatibility for s: expected String, found Int
+Semantic error: Type mismatch for variable 's': expected String, found Int

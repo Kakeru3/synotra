@@ -406,6 +406,11 @@ impl Codegen {
                     "remove",
                     "containsKey",
                     "contains",
+                    "keys",
+                    "values",
+                    "addAll",
+                    "putAll",
+                    "clear",
                 ];
 
                 if collection_methods.contains(&method.as_str()) {
