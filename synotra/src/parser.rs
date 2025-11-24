@@ -2,6 +2,13 @@ use crate::ast::*;
 use crate::lexer::Token;
 use chumsky::prelude::*;
 
+#[derive(Clone, Debug)]
+enum CallSuffix {
+    Method(String, Option<Vec<Expr>>), // .name(args) or .name
+    Call(Vec<Expr>),                   // (args)
+    Index(Expr),                       // [index]
+}
+
 // Helper function to parse expressions from token sequence (for string interpolation)
 fn parse_expr_from_tokens(tokens: &[Token]) -> Result<Expr, String> {
     if tokens.is_empty() {
@@ -86,9 +93,9 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                 *pos += 1; // Skip '.'
                 if *pos < tokens.len() {
                     if let Token::Ident(method_name) = &tokens[*pos] {
-                        *pos += 1; // Skip method name
+                        *pos += 1; // Skip method/field name
 
-                        // Check for arguments
+                        // Check for arguments (method call)
                         if *pos < tokens.len() && tokens[*pos] == Token::LParen {
                             *pos += 1; // Skip '('
                             let mut args = Vec::new();
@@ -110,10 +117,11 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                                 return Err("Expected ')'".to_string());
                             }
                         } else {
-                            return Err("Expected '(' after method name".to_string());
+                            // Field access (no parentheses)
+                            expr = Expr::FieldAccess(Box::new(expr), method_name.clone());
                         }
                     } else {
-                        return Err("Expected method name after '.'".to_string());
+                        return Err("Expected field or method name after '.'".to_string());
                     }
                 } else {
                     return Err("Unexpected end after '.'".to_string());
@@ -289,7 +297,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .clone()
             .then(
                 choice((
-                    // Method call: .method(args)
+                    // Method call or field access: .ident(args) or .ident
                     just(Token::Dot)
                         .ignore_then(ident)
                         .then(
@@ -298,98 +306,53 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                                 .delimited_by(just(Token::LParen), just(Token::RParen))
                                 .or_not(),
                         )
-                        .map(|(method, args)| (Some(method), args, false)), // (method, args, is_index)
+                        .map(|(method, args)| CallSuffix::Method(method, args)),
                     // Function call: (args)
                     expr.clone()
                         .separated_by(just(Token::Comma))
                         .delimited_by(just(Token::LParen), just(Token::RParen))
-                        .map(|args| (Some("invoke".to_string()), Some(args), false)), // Treat as invoke or handle in map
+                        .map(CallSuffix::Call),
                     // Index access: [index]
                     expr.clone()
                         .delimited_by(just(Token::LBracket), just(Token::RBracket))
-                        .map(|index| (None, Some(vec![index]), true)), // (None, [index], is_index)
+                        .map(CallSuffix::Index),
                 ))
-                .or_not(),
+                .repeated(),
             )
-            .map(|(target, call_suffix)| {
-                if let Some((method, args, is_index)) = call_suffix {
-                    if is_index {
-                        // Index access: target[index]
-                        let index = args.unwrap().into_iter().next().unwrap();
-                        Expr::Index(Box::new(target), Box::new(index))
-                    } else if let Some(args) = args {
-                        // Method or Function call
-                        if let Some(m) = method {
-                            if m == "invoke" {
-                                // Function call: target(args)
-                                // If target is a variable, it's a function call.
-                                // If target is an expression, it's an invoke?
-                                // For println(args), target is Variable("println").
-                                // We want Expr::Call(Variable("self"), "println", args) ??
-                                // No, Expr::Call structure is (target, method, args).
-                                // If I have `println(...)`, it's a global function or method on self.
-                                // In original parser:
-                                // if let Expr::Variable(name) = target {
-                                //      Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
-                                // }
-
-                                if let Expr::Variable(name) = target {
-                                    // If target is a simple variable name with args, it could be:
-                                    // 1. A message constructor: CalcFib(35) - uppercase
-                                    // 2. A function call: println("hello") - lowercase
-                                    // Convention: data messages start with uppercase
-                                    if let Some(first_char) = name.chars().next() {
-                                        if first_char.is_uppercase() {
-                                            // Uppercase: treat as message constructor
-                                            Expr::Construct {
-                                                name: name.clone(),
-                                                args,
-                                            }
-                                        } else {
-                                            // Lowercase: treat as function call on self
-                                            Expr::Call(
-                                                Box::new(Expr::Variable("self".to_string())),
-                                                name,
-                                                args,
-                                            )
-                                        }
-                                    } else {
-                                        // Empty name (shouldn't happen)
-                                        Expr::Call(
-                                            Box::new(Expr::Variable("self".to_string())),
-                                            name,
-                                            args,
-                                        )
-                                    }
-                                } else {
-                                    Expr::Call(Box::new(target), "invoke".to_string(), args)
-                                }
+            .foldl(|target, suffix| match suffix {
+                CallSuffix::Index(index) => Expr::Index(Box::new(target), Box::new(index)),
+                CallSuffix::Call(args) => match target {
+                    Expr::Variable(name) => {
+                        if let Some(first_char) = name.chars().next() {
+                            if first_char.is_uppercase() {
+                                Expr::Construct { name, args }
                             } else {
-                                // Method call: target.method(args)
-                                if m == "send" && args.len() == 1 {
-                                    Expr::Send {
-                                        target: Box::new(target),
-                                        message: Box::new(args.into_iter().next().unwrap()),
-                                    }
-                                } else if m == "ask" && args.len() == 1 {
-                                    Expr::Ask {
-                                        target: Box::new(target),
-                                        message: Box::new(args.into_iter().next().unwrap()),
-                                    }
-                                } else {
-                                    Expr::Call(Box::new(target), m, args)
-                                }
+                                Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
                             }
                         } else {
-                            // Should not happen
-                            target
+                            Expr::Call(Box::new(Expr::Variable(name)), "invoke".to_string(), args)
+                        }
+                    }
+                    _ => Expr::Call(Box::new(target), "invoke".to_string(), args),
+                },
+                CallSuffix::Method(m, args) => {
+                    if let Some(args) = args {
+                        if m == "send" && args.len() == 1 {
+                            Expr::Send {
+                                target: Box::new(target),
+                                message: Box::new(args.into_iter().next().unwrap()),
+                            }
+                        } else if m == "ask" && args.len() == 1 {
+                            Expr::Ask {
+                                target: Box::new(target),
+                                message: Box::new(args.into_iter().next().unwrap()),
+                            }
+                        } else {
+                            Expr::Call(Box::new(target), m, args)
                         }
                     } else {
-                        // Property access (field) - not handled yet
-                        target
+                        Expr::FieldAccess(Box::new(target), m)
                     }
-                } else {
-                    target
                 }
             });
 

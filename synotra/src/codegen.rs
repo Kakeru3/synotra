@@ -542,6 +542,10 @@ impl Codegen {
                 // TODO: Implement object-oriented Send in Phase 4
                 Value::ConstInt(0)
             }
+            Expr::FieldAccess(_, _) => {
+                // TODO: Implement field access in Phase 4
+                Value::ConstInt(0)
+            }
             Expr::Construct { name: _, args: _ } => {
                 // TODO: Implement message construction in VM
                 // For now, return a placeholder value

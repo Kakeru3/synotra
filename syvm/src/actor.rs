@@ -808,15 +808,13 @@ impl Actor {
                             locals[*result] = Value::Map(HashMap::new());
                         } else if func == "MutableSet.new" {
                             locals[*result] = Value::Set(HashSet::new());
+                        } else if let Some(handler) = self.handlers.get(func).cloned() {
+                            let return_val = self.execute_function(&handler, arg_vals);
+                            locals[*result] = return_val;
                         } else {
-                            if let Some(handler) = self.handlers.get(func).cloned() {
-                                let return_val = self.execute_function(&handler, arg_vals);
-                                locals[*result] = return_val;
-                            } else {
-                                // Function not found
-                                eprintln!("Runtime Error: Function '{}' not found", func);
-                                locals[*result] = Value::ConstInt(0);
-                            }
+                            // Function not found
+                            eprintln!("Runtime Error: Function '{}' not found", func);
+                            locals[*result] = Value::ConstInt(0);
                         }
                     }
                     Instruction::SwLoad {

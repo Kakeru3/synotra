@@ -762,5 +762,29 @@ fn analyze_expr(
                 None => Err(format!("Undefined data message '{}'", name)),
             }
         }
+        Expr::FieldAccess(target, field_name) => {
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+
+            match target_ty {
+                Type::UserDefined(type_name) => match symbols.lookup(&type_name) {
+                    Some(Symbol::DataMessage(fields)) => {
+                        for (fname, fty) in fields {
+                            if fname == field_name {
+                                return Ok(fty.clone());
+                            }
+                        }
+                        Err(format!(
+                            "Field '{}' not found in type '{}'",
+                            field_name, type_name
+                        ))
+                    }
+                    _ => Err(format!("Type '{}' does not have fields", type_name)),
+                },
+                _ => Err(format!(
+                    "Cannot access field '{}' on type {:?}",
+                    field_name, target_ty
+                )),
+            }
+        }
     }
 }

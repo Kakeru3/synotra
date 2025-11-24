@@ -1,0 +1,42 @@
+// Complex integration test for method call syntax
+
+data message User(val id: Int, val name: String)
+data message UpdateProfile(val user: User, val active: Int) // Int as boolean (0/1)
+
+actor Database(name: String) {
+    io fun update(msg: UpdateProfile) {
+        println("Updating profile for user ${msg.user.name} (ID: ${msg.user.id})")
+        if (msg.active == 1) {
+            println("Status: Active")
+        } else {
+            println("Status: Inactive")
+        }
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("Starting complex test")
+        
+        // Test nested message construction
+        // Note: We don't have a way to get a real ActorRef yet without spawn.
+        // So we just construct messages to verify syntax and type checking.
+        
+        var user = User(42, "Alice")
+        var update = UpdateProfile(user, 1)
+        
+        println("Created nested message: ${update.user.name}")
+        
+        // Test direct nested construction
+        var direct = UpdateProfile(User(99, "Bob"), 0)
+        println("Created direct nested message: ${direct.user.name}")
+    }
+    
+    // Function taking ActorRef to verify send syntax with complex types
+    io fun test_db(db: ActorRef<UpdateProfile>) {
+        db.send(UpdateProfile(User(1, "Admin"), 1))
+        
+        var u = User(2, "Guest")
+        db.send(UpdateProfile(u, 0))
+    }
+}
