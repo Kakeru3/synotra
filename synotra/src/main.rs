@@ -32,7 +32,7 @@ fn main() {
 
     match result {
         Ok(program) => {
-            eprintln!("[DEBUG] Parsed AST: {:#?}", program);
+            // println!("{:#?}", program);
             match sema::analyze(&program) {
                 Ok(symbols) => {
                     // println!("Semantic analysis passed");

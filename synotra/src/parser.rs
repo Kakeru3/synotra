@@ -334,7 +334,11 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             just(Token::Ident("spawn".to_string()))
                 .ignore_then(
                     ident
-                        .then(expr.clone().separated_by(just(Token::Comma)).or_not())
+                        .then(
+                            just(Token::Comma)
+                                .ignore_then(expr.clone().separated_by(just(Token::Comma)))
+                                .or_not(),
+                        )
                         .delimited_by(just(Token::LParen), just(Token::RParen)),
                 )
                 .map(|(actor_type, args)| Expr::Spawn {
