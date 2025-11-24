@@ -92,8 +92,8 @@ pub enum Stmt {
     Expr(Expr),
     Return(Option<Expr>),
     Send {
-        target: Expr,
-        message: Expr,
+        target: String,  // Actor name (identifier)
+        message: String, // Handler name (identifier)
         args: Vec<Expr>,
     },
     If(Expr, Block, Option<Block>),
@@ -110,8 +110,8 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),        // target[index]
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
     Ask {
-        target: Box<Expr>,
-        message: Box<Expr>,
+        target: String,  // Actor name (identifier)
+        message: String, // Handler name (identifier)
         args: Vec<Expr>,
     },
 }

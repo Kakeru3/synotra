@@ -189,9 +189,10 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     let expr = recursive(|expr| {
         let ask_expr = just(Token::Ask)
             .ignore_then(
-                expr.clone()
+                ident
+                    .clone() // Actor name (identifier)
                     .then_ignore(just(Token::Comma))
-                    .then(expr.clone())
+                    .then(ident.clone()) // Handler name (identifier)
                     .then(
                         just(Token::Comma)
                             .ignore_then(expr.clone().separated_by(just(Token::Comma)))
@@ -201,8 +202,8 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     .delimited_by(just(Token::LParen), just(Token::RParen)),
             )
             .map(|((target, message), args)| Expr::Ask {
-                target: Box::new(target),
-                message: Box::new(message),
+                target,
+                message,
                 args,
             });
 
@@ -445,9 +446,10 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
 
         let send_stmt = just(Token::Send)
             .ignore_then(
-                expr.clone()
+                ident
+                    .clone() // Actor name (identifier)
                     .then_ignore(just(Token::Comma))
-                    .then(expr.clone())
+                    .then(ident.clone()) // Handler name (identifier)
                     .then(
                         just(Token::Comma)
                             .ignore_then(expr.clone().separated_by(just(Token::Comma)))

@@ -181,6 +181,20 @@ cargo run --release --bin syvm -- ../example/fib_parallel_100x.syi
 5. **Codegen**: Generate IR in `codegen.rs`
 6. **VM**: Implement execution in `actor.rs`
 
+## Editor Support
+
+### VS Code Extension
+
+A VS Code extension for Synotra is available, providing syntax highlighting and language support:
+
+**[synotra-vscode](https://github.com/BlueGeckoJP/synotra-vscode)**
+
+Features:
+
+- Syntax highlighting for `.sy` files
+- Language server protocol (LSP) support
+- Code snippets and autocompletion
+
 ## Roadmap
 
 ### ✅ Completed

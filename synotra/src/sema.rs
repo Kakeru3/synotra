@@ -271,8 +271,8 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             }
         }
         Stmt::Send {
-            target,
-            message,
+            target: _,  // Actor name (identifier) - no need to analyze
+            message: _, // Handler name (identifier) - no need to analyze
             args,
         } => {
             // Check: send() can only be used in IO context
@@ -282,8 +282,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 );
             }
 
-            analyze_expr(target, symbols, is_io_context)?;
-            analyze_expr(message, symbols, is_io_context)?;
+            // Analyze arguments
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
             }
@@ -637,8 +636,8 @@ fn analyze_expr(
             Ok(Type::Int)
         }
         Expr::Ask {
-            target,
-            message,
+            target: _,  // Actor name (identifier) - no need to analyze
+            message: _, // Handler name (identifier) - no need to analyze
             args,
         } => {
             // Check: ask() can only be used in IO context
@@ -648,8 +647,7 @@ fn analyze_expr(
                 );
             }
 
-            analyze_expr(target, symbols, is_io_context)?;
-            analyze_expr(message, symbols, is_io_context)?;
+            // Analyze arguments
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
             }

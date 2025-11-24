@@ -186,12 +186,11 @@ impl Codegen {
                 message,
                 args,
             } => {
-                let target_val = self.gen_expr(target);
-                let msg_val = self.gen_expr(message);
+                // target and message are now String identifiers
                 let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
                 self.current_block_mut().instrs.push(Instruction::Send {
-                    target: target_val,
-                    msg: msg_val,
+                    target: Value::ConstString(target.clone()),
+                    msg: Value::ConstString(message.clone()),
                     args: arg_vals,
                 });
             }
@@ -549,15 +548,14 @@ impl Codegen {
                 message,
                 args,
             } => {
-                let target_val = self.gen_expr(target);
-                let msg_val = self.gen_expr(message);
+                // target and message are now String identifiers
                 let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
                 let res = self.alloc_temp();
 
                 self.current_block_mut().instrs.push(Instruction::Ask {
                     result: res,
-                    target: target_val,
-                    msg: msg_val,
+                    target: Value::ConstString(target.clone()),
+                    msg: Value::ConstString(message.clone()),
                     args: arg_vals,
                 });
 

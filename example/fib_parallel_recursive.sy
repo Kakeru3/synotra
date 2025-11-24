@@ -4,12 +4,12 @@ actor main(name: String) {
     io fun run(msg: Start) {
         println("=== PARALLEL BENCHMARK ===")
         
-        var f35 = ask("Worker1", "calc_fib_100k", 35)
-        var f36 = ask("Worker2", "calc_fib_100k", 36)
-        var f37 = ask("Worker3", "calc_fib_100k", 37)
-        var f38 = ask("Worker4", "calc_fib_100k", 38)
-        var f39 = ask("Worker5", "calc_fib_100k", 39)
-        var f40 = ask("Worker6", "calc_fib_100k", 40)
+        var f35 = ask(Worker1, calc_fib_100k, 35)
+        var f36 = ask(Worker2, calc_fib_100k, 36)
+        var f37 = ask(Worker3, calc_fib_100k, 37)
+        var f38 = ask(Worker4, calc_fib_100k, 38)
+        var f39 = ask(Worker5, calc_fib_100k, 39)
+        var f40 = ask(Worker6, calc_fib_100k, 40)
         
         var total = f35 + f36 + f37 + f38 + f39 + f40
         print("Total: ")
