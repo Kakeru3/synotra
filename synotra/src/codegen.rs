@@ -3,24 +3,27 @@ use crate::ast::*;
 use crate::ir::Instruction;
 use crate::ir::Terminator;
 use crate::ir::*;
+use crate::sema::{Symbol, SymbolTable};
 use std::collections::HashMap;
 
-pub struct Codegen {
+pub struct Codegen<'a> {
     blocks: Vec<BasicBlock>,
     current_block_idx: usize,
     locals_map: HashMap<String, usize>,
     next_local_id: usize,
     current_actor: String,
+    symbols: &'a SymbolTable,
 }
 
-impl Codegen {
-    pub fn new(actor_name: String) -> Self {
+impl<'a> Codegen<'a> {
+    pub fn new(actor_name: String, symbols: &'a SymbolTable) -> Self {
         Codegen {
             blocks: Vec::new(),
             current_block_idx: 0,
             locals_map: HashMap::new(),
             next_local_id: 0,
             current_actor: actor_name,
+            symbols,
         }
     }
 
@@ -557,8 +560,20 @@ impl Codegen {
             Expr::Construct {
                 name,
                 args,
-                field_names,
+                field_names: _,
             } => {
+                // Get field names from symbol table
+                let field_names =
+                    if let Some(Symbol::DataMessage(fields)) = self.symbols.lookup(name) {
+                        fields
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>()
+                    } else {
+                        // Fallback: use field_0, field_1, etc. if not found
+                        (0..args.len()).map(|i| format!("field_{}", i)).collect()
+                    };
+
                 // Generate (field_name, value) pairs
                 let mut field_pairs = Vec::new();
                 for (field_name, arg) in field_names.iter().zip(args.iter()) {

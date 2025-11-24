@@ -116,28 +116,40 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
     }
 }
 
-pub fn analyze(program: &Program) -> Result<(), String> {
+pub fn analyze(program: &Program) -> Result<SymbolTable, String> {
     let mut symbols = SymbolTable::new();
 
     // 1. Register top-level definitions
+    // First pass: Register all data messages
+    for def in &program.definitions {
+        if let Definition::DataMessage(data_def) = def {
+            let fields: Vec<(String, Type)> = data_def
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.field_type.clone()))
+                .collect();
+            symbols.insert(data_def.name.clone(), Symbol::DataMessage(fields));
+        }
+    }
+
+    // Second pass: Register actors and their types
+    for def in &program.definitions {
+        if let Definition::Actor(actor_def) = def {
+            symbols.insert(
+                actor_def.name.clone(),
+                Symbol::Actor(actor_def.name.clone()),
+            );
+        }
+    }
+
+    // 1. Register top-level definitions (excluding Data and Actor which are handled above)
     for def in &program.definitions {
         match def {
-            Definition::Actor(actor) => {
-                symbols.insert(actor.name.clone(), Symbol::Actor(actor.name.clone()));
-            }
+            Definition::Actor(_) => { /* Handled in second pass */ }
             Definition::Message(msg) => {
                 symbols.insert(msg.name.clone(), Symbol::Message(msg.name.clone()));
             }
-            Definition::DataMessage(data_msg) => {
-                // Collect fields with their types for registration
-                let fields: Vec<(String, Type)> = data_msg
-                    .fields
-                    .iter()
-                    .map(|f| (f.name.clone(), f.field_type.clone()))
-                    .collect();
-
-                symbols.insert(data_msg.name.clone(), Symbol::DataMessage(fields));
-            }
+            Definition::DataMessage(_) => { /* Handled in first pass */ }
             Definition::Function(func) => {
                 let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
                 symbols.insert(
@@ -165,7 +177,8 @@ pub fn analyze(program: &Program) -> Result<(), String> {
         }
     }
 
-    Ok(())
+    // Return the symbol table
+    Ok(symbols)
 }
 
 fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), String> {
