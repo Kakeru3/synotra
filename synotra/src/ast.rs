@@ -88,6 +88,7 @@ pub enum Type {
     Bool,
     UserDefined(String),
     Generic(String, Vec<Type>), // e.g., List<Int>
+    ActorRef(Box<Type>),        // e.g., ActorRef<CalcFib>
     Unknown,
 }
 

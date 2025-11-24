@@ -1,0 +1,17 @@
+// Test ActorRef type syntax
+
+data message CalcFib(val n: Int)
+data message FibResult(val value: Int)
+
+// Actor with ActorRef parameter
+actor Worker(name: String, workerRef: ActorRef<CalcFib>) {
+    io fun process() {
+        println("Worker with ActorRef type")
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("ActorRef type test")
+    }
+}

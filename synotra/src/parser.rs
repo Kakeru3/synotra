@@ -176,6 +176,18 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 "Int" => Type::Int,
                 "String" => Type::String,
                 "Bool" => Type::Bool,
+                "ActorRef" => {
+                    // ActorRef<MessageType>
+                    if let Some(mut args) = args {
+                        if args.len() == 1 {
+                            Type::ActorRef(Box::new(args.remove(0)))
+                        } else {
+                            Type::Unknown // Error: ActorRef requires exactly one type argument
+                        }
+                    } else {
+                        Type::Unknown // Error: ActorRef requires a type argument
+                    }
+                }
                 _ => {
                     if let Some(args) = args {
                         Type::Generic(name, args)
