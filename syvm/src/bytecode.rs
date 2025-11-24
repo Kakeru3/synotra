@@ -75,7 +75,7 @@ pub enum Instruction {
     CreateMessage {
         result: usize,
         type_name: String,
-        field_values: Vec<Value>,
+        field_values: Vec<(String, Value)>, // (field_name, value) pairs
     },
     GetField {
         result: usize,

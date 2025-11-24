@@ -570,9 +570,9 @@ impl Actor {
                     } => {
                         // Resolve all field values
                         let mut fields = HashMap::new();
-                        for (idx, val) in field_values.iter().enumerate() {
+                        for (field_name, val) in field_values.iter() {
                             let resolved = self.resolve_value(val, &locals);
-                            fields.insert(format!("field_{}", idx), Box::new(resolved));
+                            fields.insert(field_name.clone(), Box::new(resolved));
                         }
 
                         // Create the message value

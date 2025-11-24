@@ -554,23 +554,27 @@ impl Codegen {
 
                 Value::Local(result_idx)
             }
-            Expr::Construct { name, args } => {
-                // Generate values for all arguments
-                let mut field_values = Vec::new();
-                for arg in args {
-                    field_values.push(self.gen_expr(arg));
+            Expr::Construct {
+                name,
+                args,
+                field_names,
+            } => {
+                // Generate (field_name, value) pairs
+                let mut field_pairs = Vec::new();
+                for (field_name, arg) in field_names.iter().zip(args.iter()) {
+                    field_pairs.push((field_name.clone(), self.gen_expr(arg)));
                 }
 
                 // Allocate local for the result
                 let result_idx = self.get_or_alloc_local(&format!("_msg_{}", name));
 
-                // Emit CreateMessage instruction
+                // Emit CreateMessage instruction with field pairs
                 self.current_block_mut()
                     .instrs
                     .push(Instruction::CreateMessage {
                         result: result_idx,
                         type_name: name.clone(),
-                        field_values,
+                        field_values: field_pairs, // (field_name, value) pairs
                     });
 
                 Value::Local(result_idx)

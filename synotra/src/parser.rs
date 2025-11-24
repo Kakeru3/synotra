@@ -325,7 +325,12 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     Expr::Variable(name) => {
                         if let Some(first_char) = name.chars().next() {
                             if first_char.is_uppercase() {
-                                Expr::Construct { name, args }
+                                // Uppercase: treat as message constructor
+                                Expr::Construct {
+                                    name: name.clone(),
+                                    args,
+                                    field_names: vec![], // Parser doesn't have field names, sema will fill this
+                                }
                             } else {
                                 Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
                             }

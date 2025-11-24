@@ -129,8 +129,9 @@ pub enum Expr {
     },
     FieldAccess(Box<Expr>, String), // target.field
     Construct {
-        name: String,    // Data message name
-        args: Vec<Expr>, // Constructor arguments
+        name: String,             // Data message name
+        args: Vec<Expr>,          // Constructor arguments
+        field_names: Vec<String>, // Field names in order
     },
 }
 

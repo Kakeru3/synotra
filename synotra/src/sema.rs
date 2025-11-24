@@ -725,7 +725,11 @@ fn analyze_expr(
 
             Ok(Type::Int) // send returns Unit/Int (0)
         }
-        Expr::Construct { name, args } => {
+        Expr::Construct {
+            name,
+            args,
+            field_names: _,
+        } => {
             // Validate that 'name' is a registered data message
             match symbols.lookup(name) {
                 Some(Symbol::DataMessage(fields)) => {
