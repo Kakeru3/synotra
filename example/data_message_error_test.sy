@@ -1,0 +1,11 @@
+// This test should FAIL to compile
+// Testing that 'var' is rejected in data message fields
+
+// This should cause a parse error - var is not allowed
+data message InvalidMessage(var count: Int)
+
+actor main(name: String) {
+    io fun run() {
+        println("This should not run")
+    }
+}

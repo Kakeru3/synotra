@@ -1,0 +1,24 @@
+// Comprehensive data message validation test
+
+// Simple message with one field
+data message Ping(val timestamp: Int)
+
+// Message with multiple fields of different types
+data message UserInfo(val name: String, val age: Int, val active: Int)
+
+// Message with no fields (empty message)
+data message Empty()
+
+// Nested type usage (using another type)
+data message Response(val code: Int, val message: String)
+
+// Multiple data messages
+data message Request(val id: Int, val payload: String)
+data message Result(val success: Int, val data: String)
+
+actor main(name: String) {
+    io fun run() {
+        println("Data message validation test passed")
+        println("All data message definitions compiled successfully")
+    }
+}
