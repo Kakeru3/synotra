@@ -8,6 +8,7 @@ pub enum Definition {
     Import(ImportDef),
     Actor(ActorDef),
     Message(MessageDef),
+    DataMessage(DataMessageDef), // data message Name(val field: Type, ...)
     Function(FunctionDef),
     Module(ModuleDef),
 }
@@ -51,6 +52,18 @@ pub struct FieldDef {
 pub struct MessageDef {
     pub name: String,
     pub params: Vec<Param>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DataMessageDef {
+    pub name: String,
+    pub fields: Vec<DataField>, // All fields must be immutable (val)
+}
+
+#[derive(Debug, Clone)]
+pub struct DataField {
+    pub name: String,
+    pub field_type: Type,
 }
 
 #[derive(Debug, Clone)]

@@ -573,7 +573,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         );
 
     let message_def = just(Token::Class)
-        .ignore_then(ident)
+        .ignore_then(ident.clone())
         .then(
             param
                 .clone()
@@ -581,6 +581,23 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
         )
         .map(|(name, params)| MessageDef { name, params });
+
+    // Parse: data message Name(val field1: Type1, val field2: Type2, ...)
+    let data_field = just(Token::Val)
+        .ignore_then(ident.clone())
+        .then_ignore(just(Token::Colon))
+        .then(type_parser.clone())
+        .map(|(name, field_type)| DataField { name, field_type });
+
+    let data_message_def = just(Token::Data)
+        .ignore_then(just(Token::Message))
+        .ignore_then(ident.clone())
+        .then(
+            data_field
+                .separated_by(just(Token::Comma))
+                .delimited_by(just(Token::LParen), just(Token::RParen)),
+        )
+        .map(|(name, fields)| DataMessageDef { name, fields });
 
     let field_def = choice((just(Token::Var), just(Token::Val)))
         .then(ident.clone())
@@ -649,6 +666,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
 
     let definition = choice((
         import_def.map(Definition::Import),
+        data_message_def.map(Definition::DataMessage), // Must come before message_def
         actor_def.map(Definition::Actor),
         message_def.map(Definition::Message),
         function_def.map(Definition::Function),

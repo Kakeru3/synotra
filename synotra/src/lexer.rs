@@ -12,6 +12,10 @@ pub enum Token {
     Actor,
     #[token("class")]
     Class,
+    #[token("data")]
+    Data,
+    #[token("message")]
+    Message,
     #[token("fun")]
     Fun,
     #[token("val")]
@@ -28,7 +32,7 @@ pub enum Token {
     Crdt,
     #[token("module")]
     Module,
-    
+
     // Control flow (implicit in some cases, but good to have)
     #[token("if")]
     If,
@@ -90,7 +94,7 @@ pub enum Token {
     // Literals
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
     Int(i64),
-    
+
     #[regex(r#""([^"\\]|\\["\\bnfrt]|u[a-fA-F0-9]{4})*""#, |lex| {
         let s = lex.slice();
         s[1..s.len()-1].to_string()
@@ -100,10 +104,8 @@ pub enum Token {
     // Identifiers
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 0)]
     Ident(String),
-
     // Error
     // #[error] is removed in Logos 0.13, it uses Result
-
 }
 
 impl fmt::Display for Token {
