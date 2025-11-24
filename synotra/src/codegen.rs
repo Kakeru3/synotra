@@ -561,6 +561,12 @@ impl Codegen {
 
                 Value::Local(res)
             }
+            Expr::Construct { name: _, args: _ } => {
+                // TODO: Implement message construction in VM
+                // For now, return a placeholder value
+                // This will be implemented in Phase 4 (runtime support)
+                Value::ConstInt(0)
+            }
         }
     }
 }

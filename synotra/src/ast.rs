@@ -128,6 +128,10 @@ pub enum Expr {
         message: String, // Handler name (identifier)
         args: Vec<Expr>,
     },
+    Construct {
+        name: String,    // Data message name
+        args: Vec<Expr>, // Constructor arguments
+    },
 }
 
 #[derive(Debug, Clone)]

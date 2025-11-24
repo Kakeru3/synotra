@@ -705,5 +705,42 @@ fn analyze_expr(
             }
             Ok(Type::Int) // ask returns a value
         }
+        Expr::Construct { name, args } => {
+            // Validate that 'name' is a registered data message
+            match symbols.lookup(name) {
+                Some(Symbol::DataMessage(fields)) => {
+                    // Clone fields to avoid borrow checker issues
+                    let fields = fields.clone();
+
+                    // Validate argument count
+                    if args.len() != fields.len() {
+                        return Err(format!(
+                            "Data message '{}' expects {} arguments, got {}",
+                            name,
+                            fields.len(),
+                            args.len()
+                        ));
+                    }
+
+                    // Analyze and type-check each argument
+                    for (i, arg) in args.iter().enumerate() {
+                        let arg_type = analyze_expr(arg, symbols, is_io_context)?;
+                        let expected_type = &fields[i].1;
+
+                        if !check_type_compatibility(&arg_type, expected_type) {
+                            return Err(format!(
+                                "Data message '{}' field '{}' expects type {:?}, got {:?}",
+                                name, fields[i].0, expected_type, arg_type
+                            ));
+                        }
+                    }
+
+                    // Return the constructed message type
+                    Ok(Type::UserDefined(name.clone()))
+                }
+                Some(_) => Err(format!("'{}' is not a data message", name)),
+                None => Err(format!("Undefined data message '{}'", name)),
+            }
+        }
     }
 }
