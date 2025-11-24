@@ -84,6 +84,11 @@ pub enum Instruction {
         target: Value,
         field_name: String,
     },
+    Spawn {
+        result: usize,
+        actor_type: String,
+        args: Vec<Value>,
+    },
     Exit,
 }
 
@@ -111,6 +116,7 @@ pub enum Value {
         type_name: String,
         fields: HashMap<String, Box<Value>>,
     },
+    ActorRef(String), // Actor ID (UUID or instance ID)
 }
 
 impl Hash for Value {
@@ -137,9 +143,12 @@ impl Hash for Value {
                 l.hash(state);
             }
             Value::Message { type_name, .. } => {
-                6u8.hash(state);
-                type_name.hash(state);
-                // Don't hash fields to avoid deep recursion
+                8u8.hash(state);
+                type_name.hash(state); // Only hash type_name to avoid deep recursion
+            }
+            Value::ActorRef(id) => {
+                9u8.hash(state);
+                id.hash(state);
             }
             Value::Map(_) => {
                 panic!("Cannot hash Map");

@@ -603,11 +603,21 @@ impl Actor {
                                     "Warning: GetField on non-message value: {:?}",
                                     target_val
                                 );
-                                Value::ConstInt(0)
+                                Value::ConstInt(0) // Target is not a message
                             }
                         };
 
                         locals[*result] = field_val;
+                    }
+                    Instruction::Spawn {
+                        result,
+                        actor_type,
+                        args,
+                    } => {
+                        // TODO: Implement spawn - requires runtime integration
+                        // For now, create a placeholder ActorRef
+                        let actor_id = format!("{}_placeholder", actor_type);
+                        locals[*result] = Value::ActorRef(actor_id);
                     }
                     Instruction::Exit => {
                         // Signal shutdown
@@ -788,7 +798,12 @@ impl Actor {
                 type_name: type_name.clone(),
                 fields: fields.clone(),
             },
-            Value::Entry(k, v) => Value::Entry(k.clone(), v.clone()),
+            Value::ActorRef(id) => Value::ActorRef(id.clone()),
+            Value::Entry(k, v) => {
+                let resolved_k = self.resolve_value(k, locals);
+                let resolved_v = self.resolve_value(v, locals);
+                Value::Entry(Box::new(resolved_k), Box::new(resolved_v))
+            }
         }
     }
 
