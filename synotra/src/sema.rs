@@ -12,6 +12,7 @@ pub enum Symbol {
     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
     Actor(String),
     Message(String),
+    DataMessage(Vec<(String, Type)>), // Fields with types
 }
 
 impl SymbolTable {
@@ -88,6 +89,16 @@ pub fn analyze(program: &Program) -> Result<(), String> {
             }
             Definition::Message(msg) => {
                 symbols.insert(msg.name.clone(), Symbol::Message(msg.name.clone()));
+            }
+            Definition::DataMessage(data_msg) => {
+                // Collect fields with their types for registration
+                let fields: Vec<(String, Type)> = data_msg
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.field_type.clone()))
+                    .collect();
+
+                symbols.insert(data_msg.name.clone(), Symbol::DataMessage(fields));
             }
             Definition::Function(func) => {
                 let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
