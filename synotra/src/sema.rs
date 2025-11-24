@@ -506,6 +506,15 @@ fn analyze_expr(
                                     ));
                                 }
                             }
+                            "entrySet" => {
+                                if type_args.len() >= 2 {
+                                    let entry_type = Type::Generic(
+                                        "Entry".to_string(),
+                                        vec![type_args[0].clone(), type_args[1].clone()],
+                                    );
+                                    return Ok(Type::Generic("List".to_string(), vec![entry_type]));
+                                }
+                            }
                             "put" => {
                                 // Infer key and value types if currently Unknown
                                 if type_args.len() >= 2 {
@@ -574,6 +583,20 @@ fn analyze_expr(
                                         "List".to_string(),
                                         vec![type_args[0].clone()],
                                     ));
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else if name == "Entry" {
+                        match method.as_str() {
+                            "key" => {
+                                if type_args.len() >= 2 {
+                                    return Ok(type_args[0].clone());
+                                }
+                            }
+                            "value" => {
+                                if type_args.len() >= 2 {
+                                    return Ok(type_args[1].clone());
                                 }
                             }
                             _ => {}

@@ -315,6 +315,16 @@ impl Actor {
                                         locals[*target] = Value::Map(map);
                                         Value::ConstBool(true)
                                     }
+                                    "entrySet" => {
+                                        let mut entries = Vec::new();
+                                        for (k, v) in &map {
+                                            entries.push(Value::Entry(
+                                                Box::new(k.clone()),
+                                                Box::new(v.clone()),
+                                            ));
+                                        }
+                                        Value::List(entries)
+                                    }
                                     _ => {
                                         eprintln!("Runtime Error: Unknown Map method '{}'", method);
                                         Value::ConstInt(0)
@@ -388,6 +398,14 @@ impl Actor {
                                     }
                                 }
                             }
+                            Value::Entry(k, v) => match method.as_str() {
+                                "key" => *k.clone(),
+                                "value" => *v.clone(),
+                                _ => {
+                                    eprintln!("Runtime Error: Unknown Entry method '{}'", method);
+                                    Value::ConstInt(0)
+                                }
+                            },
                             _ => {
                                 eprintln!(
                                     "Runtime Error: Method call on non-collection type: {:?}",
@@ -719,7 +737,8 @@ impl Actor {
             }
             Value::List(list) => Value::List(list.clone()),
             Value::Map(map) => Value::Map(map.clone()),
-            Value::Set(set) => Value::Set(set.clone()),
+            Value::Set(s) => Value::Set(s.clone()),
+            Value::Entry(k, v) => Value::Entry(k.clone(), v.clone()),
         }
     }
 

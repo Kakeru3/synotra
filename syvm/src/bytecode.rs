@@ -143,6 +143,7 @@ pub enum Value {
     List(Vec<Value>),
     Map(HashMap<Value, Value>),
     Set(HashSet<Value>),
+    Entry(Box<Value>, Box<Value>), // Key, Value
 }
 
 impl Hash for Value {
@@ -177,6 +178,11 @@ impl Hash for Value {
             }
             Value::Set(_) => {
                 panic!("Cannot hash Set");
+            }
+            Value::Entry(k, v) => {
+                6u8.hash(state);
+                k.hash(state);
+                v.hash(state);
             }
         }
     }
