@@ -563,6 +563,52 @@ impl Actor {
                             locals[*result] = Value::ConstInt(0);
                         }
                     }
+                    Instruction::CreateMessage {
+                        result,
+                        type_name,
+                        field_values,
+                    } => {
+                        // Resolve all field values
+                        let mut fields = HashMap::new();
+                        for (idx, val) in field_values.iter().enumerate() {
+                            let resolved = self.resolve_value(val, &locals);
+                            fields.insert(format!("field_{}", idx), Box::new(resolved));
+                        }
+
+                        // Create the message value
+                        let msg_val = Value::Message {
+                            type_name: type_name.clone(),
+                            fields,
+                        };
+
+                        locals[*result] = msg_val;
+                    }
+                    Instruction::GetField {
+                        result,
+                        target,
+                        field_name,
+                    } => {
+                        let target_val = self.resolve_value(target, &locals);
+
+                        let field_val = match &target_val {
+                            Value::Message { fields, .. } => {
+                                // Try to get the field by name
+                                fields
+                                    .get(field_name)
+                                    .map(|boxed_val| *boxed_val.clone())
+                                    .unwrap_or(Value::ConstInt(0))
+                            }
+                            _ => {
+                                println!(
+                                    "Warning: GetField on non-message value: {:?}",
+                                    target_val
+                                );
+                                Value::ConstInt(0)
+                            }
+                        };
+
+                        locals[*result] = field_val;
+                    }
                     Instruction::Exit => {
                         // Signal shutdown
                         let _ = self.shutdown_signal.send(());
@@ -738,6 +784,10 @@ impl Actor {
             Value::List(list) => Value::List(list.clone()),
             Value::Map(map) => Value::Map(map.clone()),
             Value::Set(s) => Value::Set(s.clone()),
+            Value::Message { type_name, fields } => Value::Message {
+                type_name: type_name.clone(),
+                fields: fields.clone(),
+            },
             Value::Entry(k, v) => Value::Entry(k.clone(), v.clone()),
         }
     }

@@ -74,6 +74,16 @@ pub enum Instruction {
         index: usize,
         value: usize,
     },
+    CreateMessage {
+        result: usize,
+        type_name: String,
+        field_values: Vec<Value>,
+    },
+    GetField {
+        result: usize,
+        target: Value,
+        field_name: String,
+    },
     Exit,
 }
 
@@ -95,6 +105,12 @@ pub enum Value {
     List(Vec<Value>),
     Map(HashMap<Value, Value>),
     Set(HashSet<Value>),
+
+    // Structured Messages
+    Message {
+        type_name: String,
+        fields: HashMap<String, Box<Value>>,
+    },
 }
 
 impl Hash for Value {
@@ -119,6 +135,11 @@ impl Hash for Value {
             Value::List(l) => {
                 5u8.hash(state);
                 l.hash(state);
+            }
+            Value::Message { type_name, .. } => {
+                6u8.hash(state);
+                type_name.hash(state);
+                // Don't hash fields to avoid deep recursion
             }
             Value::Map(_) => {
                 panic!("Cannot hash Map");

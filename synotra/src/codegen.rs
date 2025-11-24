@@ -542,15 +542,38 @@ impl Codegen {
                 // TODO: Implement object-oriented Send in Phase 4
                 Value::ConstInt(0)
             }
-            Expr::FieldAccess(_, _) => {
-                // TODO: Implement field access in Phase 4
-                Value::ConstInt(0)
+            Expr::FieldAccess(target, field_name) => {
+                let target_val = self.gen_expr(target);
+                let result_idx = self.get_or_alloc_local(&format!("_field_{}", field_name));
+
+                self.current_block_mut().instrs.push(Instruction::GetField {
+                    result: result_idx,
+                    target: target_val,
+                    field_name: field_name.clone(),
+                });
+
+                Value::Local(result_idx)
             }
-            Expr::Construct { name: _, args: _ } => {
-                // TODO: Implement message construction in VM
-                // For now, return a placeholder value
-                // This will be implemented in Phase 4 (runtime support)
-                Value::ConstInt(0)
+            Expr::Construct { name, args } => {
+                // Generate values for all arguments
+                let mut field_values = Vec::new();
+                for arg in args {
+                    field_values.push(self.gen_expr(arg));
+                }
+
+                // Allocate local for the result
+                let result_idx = self.get_or_alloc_local(&format!("_msg_{}", name));
+
+                // Emit CreateMessage instruction
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::CreateMessage {
+                        result: result_idx,
+                        type_name: name.clone(),
+                        field_values,
+                    });
+
+                Value::Local(result_idx)
             }
         }
     }

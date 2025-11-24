@@ -1,0 +1,11 @@
+// Phase 4 Basic Test: Message Construction
+
+data message Greeting(val text: String)
+
+actor main(name: String) {
+    io fun run() {
+        println("Phase 4 basic test")
+        var msg = Greeting("Hello, World!")
+        println("Created message successfully")
+    }
+}
