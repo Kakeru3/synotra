@@ -177,23 +177,8 @@ impl Codegen {
                     None
                 };
                 self.current_block_mut().terminator = Terminator::Return(val);
-                // Unreachable code after return, but we need to keep pushing to a valid block
-                // Create a dead block to catch subsequent instructions
-                self.new_block();
             }
-            Stmt::Send {
-                target,
-                message,
-                args,
-            } => {
-                // target and message are now String identifiers
-                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
-                self.current_block_mut().instrs.push(Instruction::Send {
-                    target: Value::ConstString(target.clone()),
-                    msg: Value::ConstString(message.clone()),
-                    args: arg_vals,
-                });
-            }
+            // Stmt::Send removed from AST
             Stmt::If(cond, then_block, else_block) => {
                 let cond_val = self.gen_expr(cond);
 
@@ -544,22 +529,18 @@ impl Codegen {
                 Value::Local(res)
             }
             Expr::Ask {
-                target,
-                message,
-                args,
+                target: _,
+                message: _,
             } => {
-                // target and message are now String identifiers
-                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
-                let res = self.alloc_temp();
-
-                self.current_block_mut().instrs.push(Instruction::Ask {
-                    result: res,
-                    target: Value::ConstString(target.clone()),
-                    msg: Value::ConstString(message.clone()),
-                    args: arg_vals,
-                });
-
-                Value::Local(res)
+                // TODO: Implement object-oriented Ask in Phase 4
+                Value::ConstInt(0)
+            }
+            Expr::Send {
+                target: _,
+                message: _,
+            } => {
+                // TODO: Implement object-oriented Send in Phase 4
+                Value::ConstInt(0)
             }
             Expr::Construct { name: _, args: _ } => {
                 // TODO: Implement message construction in VM

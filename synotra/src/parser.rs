@@ -199,28 +199,12 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     });
 
     let expr = recursive(|expr| {
-        let ask_expr = just(Token::Ask)
-            .ignore_then(
-                ident
-                    .clone() // Actor name (identifier)
-                    .then_ignore(just(Token::Comma))
-                    .then(ident.clone()) // Handler name (identifier)
-                    .then(
-                        just(Token::Comma)
-                            .ignore_then(expr.clone().separated_by(just(Token::Comma)))
-                            .or_not()
-                            .map(|args| args.unwrap_or_default()),
-                    )
-                    .delimited_by(just(Token::LParen), just(Token::RParen)),
-            )
-            .map(|((target, message), args)| Expr::Ask {
-                target,
-                message,
-                args,
-            });
+        /* Old ask syntax removed
+        let ask_expr = just(Token::Ask) ...
+        */
 
         let atom = choice((
-            ask_expr,
+            // ask_expr, // Removed
             int_lit.map(Expr::Literal),
             str_lit.map(|s| {
                 use crate::lexer::Token as LexToken;
@@ -350,30 +334,51 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                                 // }
 
                                 if let Expr::Variable(name) = target {
-                                    // Check if it's a known global or just treat as method on self/global
-                                    // For now, map to Call(self, name, args) is what original did?
-                                    // Wait, original did:
-                                    // if let Some(m) = method { Call(target, m, args) }
-                                    // else { if Variable(name) = target { Call(self, name, args) } else { Call(target, "invoke", args) } }
-
-                                    // Here m is "invoke" (my placeholder).
-                                    // So I should check if I really have a method name from Dot.
-                                    // But I merged them.
-
-                                    // Let's distinguish Dot call from Paren call.
-                                    // I can use an enum in map instead of tuple.
-
-                                    Expr::Call(
-                                        Box::new(Expr::Variable("self".to_string())),
-                                        name,
-                                        args,
-                                    )
+                                    // If target is a simple variable name with args, it could be:
+                                    // 1. A message constructor: CalcFib(35) - uppercase
+                                    // 2. A function call: println("hello") - lowercase
+                                    // Convention: data messages start with uppercase
+                                    if let Some(first_char) = name.chars().next() {
+                                        if first_char.is_uppercase() {
+                                            // Uppercase: treat as message constructor
+                                            Expr::Construct {
+                                                name: name.clone(),
+                                                args,
+                                            }
+                                        } else {
+                                            // Lowercase: treat as function call on self
+                                            Expr::Call(
+                                                Box::new(Expr::Variable("self".to_string())),
+                                                name,
+                                                args,
+                                            )
+                                        }
+                                    } else {
+                                        // Empty name (shouldn't happen)
+                                        Expr::Call(
+                                            Box::new(Expr::Variable("self".to_string())),
+                                            name,
+                                            args,
+                                        )
+                                    }
                                 } else {
                                     Expr::Call(Box::new(target), "invoke".to_string(), args)
                                 }
                             } else {
                                 // Method call: target.method(args)
-                                Expr::Call(Box::new(target), m, args)
+                                if m == "send" && args.len() == 1 {
+                                    Expr::Send {
+                                        target: Box::new(target),
+                                        message: Box::new(args.into_iter().next().unwrap()),
+                                    }
+                                } else if m == "ask" && args.len() == 1 {
+                                    Expr::Ask {
+                                        target: Box::new(target),
+                                        message: Box::new(args.into_iter().next().unwrap()),
+                                    }
+                                } else {
+                                    Expr::Call(Box::new(target), m, args)
+                                }
                             }
                         } else {
                             // Should not happen
@@ -456,6 +461,8 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .ignore_then(expr.clone().or_not())
             .map(Stmt::Return);
 
+        // Old send syntax removed. Send is now an expression.
+        /*
         let send_stmt = just(Token::Send)
             .ignore_then(
                 ident
@@ -475,6 +482,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 message,
                 args,
             });
+        */
 
         let if_stmt = just(Token::If)
             .ignore_then(
@@ -534,19 +542,18 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 Stmt::AssignIndex(name, Box::new(index), Box::new(value))
             });
 
-        let expr_stmt = expr.clone().map(Stmt::Expr);
-
-        let_stmt
-            .or(var_stmt)
-            .or(return_stmt)
-            .or(send_stmt)
-            .or(if_stmt)
-            .or(while_stmt)
-            .or(for_stmt)
-            .or(assign_index_stmt) // Check index assignment before simple assignment if ambiguous, but here they start different
-            .or(assign_stmt)
-            .or(expr_stmt)
-            .then_ignore(just(Token::Dot).or_not()) // Optional semicolon/dot? Synotra doesn't specify, assuming optional or none
+        choice((
+            let_stmt,
+            var_stmt,
+            return_stmt,
+            if_stmt,
+            while_stmt,
+            for_stmt,
+            assign_index_stmt, // Try index assignment before variable assignment
+            assign_stmt,
+            expr.clone().map(Stmt::Expr),
+        ))
+        // .then_ignore(just(Token::Semicolon).or_not()) // No semicolon token
     });
 
     let param = ident

@@ -1,0 +1,11 @@
+// Test method call type checking failure
+
+data message Ping(val id: Int)
+data message Pong(val id: Int)
+
+actor main(name: String) {
+    io fun test(worker: ActorRef<Ping>) {
+        // Should fail: worker expects Ping, but we ask Pong
+        var res = worker.ask(Pong(1))
+    }
+}

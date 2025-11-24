@@ -24,10 +24,11 @@ pub enum Token {
     Var,
     #[token("io")]
     Io,
-    #[token("send")]
-    Send,
-    #[token("ask")]
-    Ask,
+    // Send and Ask are now identifiers (methods)
+    // #[token("send")]
+    // Send,
+    // #[token("ask")]
+    // Ask,
     #[token("crdt")]
     Crdt,
     #[token("module")]

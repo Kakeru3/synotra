@@ -322,23 +322,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 analyze_expr(e, symbols, is_io_context)?;
             }
         }
-        Stmt::Send {
-            target: _,  // Actor name (identifier) - no need to analyze
-            message: _, // Handler name (identifier) - no need to analyze
-            args,
-        } => {
-            // Check: send() can only be used in IO context
-            if !is_io_context {
-                return Err(
-                    "Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string(),
-                );
-            }
-
-            // Analyze arguments
-            for arg in args {
-                analyze_expr(arg, symbols, is_io_context)?;
-            }
-        }
+        // Stmt::Send removed from AST
         Stmt::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
@@ -687,11 +671,7 @@ fn analyze_expr(
 
             Ok(Type::Int)
         }
-        Expr::Ask {
-            target: _,  // Actor name (identifier) - no need to analyze
-            message: _, // Handler name (identifier) - no need to analyze
-            args,
-        } => {
+        Expr::Ask { target, message } => {
             // Check: ask() can only be used in IO context
             if !is_io_context {
                 return Err(
@@ -699,11 +679,51 @@ fn analyze_expr(
                 );
             }
 
-            // Analyze arguments
-            for arg in args {
-                analyze_expr(arg, symbols, is_io_context)?;
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+
+            if let Type::ActorRef(expected_msg_ty) = target_ty {
+                if !check_type_compatibility(&msg_ty, &expected_msg_ty) {
+                    return Err(format!(
+                        "ActorRef expects message type {:?}, got {:?}",
+                        expected_msg_ty, msg_ty
+                    ));
+                }
+            } else {
+                return Err(format!(
+                    "Target of 'ask' must be ActorRef, got {:?}",
+                    target_ty
+                ));
             }
-            Ok(Type::Int) // ask returns a value
+
+            Ok(Type::Int) // ask returns a value (placeholder)
+        }
+        Expr::Send { target, message } => {
+            // Check: send() can only be used in IO context
+            if !is_io_context {
+                return Err(
+                    "Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string(),
+                );
+            }
+
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+
+            if let Type::ActorRef(expected_msg_ty) = target_ty {
+                if !check_type_compatibility(&msg_ty, &expected_msg_ty) {
+                    return Err(format!(
+                        "ActorRef expects message type {:?}, got {:?}",
+                        expected_msg_ty, msg_ty
+                    ));
+                }
+            } else {
+                return Err(format!(
+                    "Target of 'send' must be ActorRef, got {:?}",
+                    target_ty
+                ));
+            }
+
+            Ok(Type::Int) // send returns Unit/Int (0)
         }
         Expr::Construct { name, args } => {
             // Validate that 'name' is a registered data message

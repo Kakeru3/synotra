@@ -105,11 +105,7 @@ pub enum Stmt {
     AssignIndex(String, Box<Expr>, Box<Expr>), // name[index] = value
     Expr(Expr),
     Return(Option<Expr>),
-    Send {
-        target: String,  // Actor name (identifier)
-        message: String, // Handler name (identifier)
-        args: Vec<Expr>,
-    },
+    // Send is now an expression
     If(Expr, Block, Option<Block>),
     While(Expr, Block),
     For(String, Expr, Expr, Block), // for (i in start..end)
@@ -124,9 +120,12 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),        // target[index]
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
     Ask {
-        target: String,  // Actor name (identifier)
-        message: String, // Handler name (identifier)
-        args: Vec<Expr>,
+        target: Box<Expr>,
+        message: Box<Expr>,
+    },
+    Send {
+        target: Box<Expr>,
+        message: Box<Expr>,
     },
     Construct {
         name: String,    // Data message name
