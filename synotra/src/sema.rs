@@ -379,7 +379,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             let collection_ty = analyze_expr(collection, symbols, is_io_context)?;
             let item_ty = match collection_ty {
                 Type::Generic(name, args) if name == "List" || name == "Set" => {
-                    if args.len() >= 1 {
+                    if !args.is_empty() {
                         args[0].clone()
                     } else {
                         return Err("Collection must have a type argument".to_string());
@@ -497,161 +497,148 @@ fn analyze_expr(
             };
 
             // Collection method inference
-            match &target_ty {
-                Type::Generic(name, type_args) => {
-                    if name == "List" {
-                        match method.as_str() {
-                            "get" => {
-                                if type_args.len() >= 1 {
-                                    return Ok(type_args[0].clone());
-                                }
+            if let Type::Generic(name, type_args) = &target_ty {
+                if name == "List" {
+                    match method.as_str() {
+                        "get" => {
+                            if !type_args.is_empty() {
+                                return Ok(type_args[0].clone());
                             }
-                            "add" => {
-                                if type_args.len() >= 1 {
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                            if let Expr::Variable(var_name) = target.as_ref() {
-                                                let new_ty = Type::Generic(
-                                                    name.clone(),
-                                                    vec![arg_ty.clone()],
-                                                );
-                                                symbols.update(
-                                                    var_name,
-                                                    Symbol::Variable(new_ty, true),
-                                                ); // Assuming mutable
-                                            }
-                                        }
-                                    }
-                                }
-                                return Ok(Type::Bool);
-                            }
-                            "size" => return Ok(Type::Int),
-                            "isEmpty" => return Ok(Type::Bool),
-                            "addAll" | "clear" => return Ok(Type::Bool),
-                            _ => {}
                         }
-                    } else if name == "Map" {
-                        match method.as_str() {
-                            "get" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[1].clone());
-                                }
-                            }
-                            "keys" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[0].clone()],
-                                    ));
-                                }
-                            }
-                            "values" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[1].clone()],
-                                    ));
-                                }
-                            }
-                            "entrySet" => {
-                                if type_args.len() >= 2 {
-                                    let entry_type = Type::Generic(
-                                        "Entry".to_string(),
-                                        vec![type_args[0].clone(), type_args[1].clone()],
-                                    );
-                                    return Ok(Type::Generic("List".to_string(), vec![entry_type]));
-                                }
-                            }
-                            "put" => {
-                                // Infer key and value types if currently Unknown
-                                if type_args.len() >= 2 {
-                                    let mut new_args = type_args.clone();
-                                    let mut changed = false;
-
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            new_args[0] =
-                                                analyze_expr(arg, symbols, is_io_context)?;
-                                            changed = true;
-                                        }
-                                    }
-                                    if let Type::Unknown = type_args[1] {
-                                        if let Some(arg) = args.get(1) {
-                                            new_args[1] =
-                                                analyze_expr(arg, symbols, is_io_context)?;
-                                            changed = true;
-                                        }
-                                    }
-
-                                    if changed {
+                        "add" => {
+                            if !type_args.is_empty() {
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
                                         if let Expr::Variable(var_name) = target.as_ref() {
-                                            let new_ty = Type::Generic(name.clone(), new_args);
+                                            let new_ty =
+                                                Type::Generic(name.clone(), vec![arg_ty.clone()]);
+                                            symbols
+                                                .update(var_name, Symbol::Variable(new_ty, true));
+                                            // Assuming mutable
+                                        }
+                                    }
+                                }
+                            }
+                            return Ok(Type::Bool);
+                        }
+                        "size" => return Ok(Type::Int),
+                        "isEmpty" => return Ok(Type::Bool),
+                        "addAll" | "clear" => return Ok(Type::Bool),
+                        _ => {}
+                    }
+                } else if name == "Map" {
+                    match method.as_str() {
+                        "get" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[1].clone());
+                            }
+                        }
+                        "keys" => {
+                            if type_args.len() >= 2 {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[0].clone()],
+                                ));
+                            }
+                        }
+                        "values" => {
+                            if type_args.len() >= 2 {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[1].clone()],
+                                ));
+                            }
+                        }
+                        "entrySet" => {
+                            if type_args.len() >= 2 {
+                                let entry_type = Type::Generic(
+                                    "Entry".to_string(),
+                                    vec![type_args[0].clone(), type_args[1].clone()],
+                                );
+                                return Ok(Type::Generic("List".to_string(), vec![entry_type]));
+                            }
+                        }
+                        "put" => {
+                            // Infer key and value types if currently Unknown
+                            if type_args.len() >= 2 {
+                                let mut new_args = type_args.clone();
+                                let mut changed = false;
+
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        new_args[0] = analyze_expr(arg, symbols, is_io_context)?;
+                                        changed = true;
+                                    }
+                                }
+                                if let Type::Unknown = type_args[1] {
+                                    if let Some(arg) = args.get(1) {
+                                        new_args[1] = analyze_expr(arg, symbols, is_io_context)?;
+                                        changed = true;
+                                    }
+                                }
+
+                                if changed {
+                                    if let Expr::Variable(var_name) = target.as_ref() {
+                                        let new_ty = Type::Generic(name.clone(), new_args);
+                                        symbols.update(var_name, Symbol::Variable(new_ty, true));
+                                    }
+                                }
+                            }
+                            return Ok(Type::Bool);
+                        }
+                        "remove" | "containsKey" | "contains" => return Ok(Type::Bool),
+                        "size" => return Ok(Type::Int),
+                        "putAll" | "clear" => return Ok(Type::Bool),
+                        _ => {}
+                    }
+                } else if name == "Set" {
+                    // println!("DEBUG: Analyzing Set method '{}'", method);
+                    match method.as_str() {
+                        "add" => {
+                            // Infer element type if currently Unknown
+                            if !type_args.is_empty() {
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                        if let Expr::Variable(var_name) = target.as_ref() {
+                                            let new_ty =
+                                                Type::Generic(name.clone(), vec![arg_ty.clone()]);
                                             symbols
                                                 .update(var_name, Symbol::Variable(new_ty, true));
                                         }
                                     }
                                 }
-                                return Ok(Type::Bool);
                             }
-                            "remove" | "containsKey" | "contains" => return Ok(Type::Bool),
-                            "size" => return Ok(Type::Int),
-                            "putAll" | "clear" => return Ok(Type::Bool),
-                            _ => {}
+                            return Ok(Type::Bool);
                         }
-                    } else if name == "Set" {
-                        // println!("DEBUG: Analyzing Set method '{}'", method);
-                        match method.as_str() {
-                            "add" => {
-                                // Infer element type if currently Unknown
-                                if type_args.len() >= 1 {
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                            if let Expr::Variable(var_name) = target.as_ref() {
-                                                let new_ty = Type::Generic(
-                                                    name.clone(),
-                                                    vec![arg_ty.clone()],
-                                                );
-                                                symbols.update(
-                                                    var_name,
-                                                    Symbol::Variable(new_ty, true),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                return Ok(Type::Bool);
+                        "remove" | "contains" | "addAll" | "clear" => return Ok(Type::Bool),
+                        "size" => return Ok(Type::Int),
+                        "values" => {
+                            if !type_args.is_empty() {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[0].clone()],
+                                ));
                             }
-                            "remove" | "contains" | "addAll" | "clear" => return Ok(Type::Bool),
-                            "size" => return Ok(Type::Int),
-                            "values" => {
-                                if type_args.len() >= 1 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[0].clone()],
-                                    ));
-                                }
-                            }
-                            _ => {}
                         }
-                    } else if name == "Entry" {
-                        match method.as_str() {
-                            "key" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[0].clone());
-                                }
+                        _ => {}
+                    }
+                } else if name == "Entry" {
+                    match method.as_str() {
+                        "key" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[0].clone());
                             }
-                            "value" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[1].clone());
-                                }
-                            }
-                            _ => {}
                         }
+                        "value" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[1].clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
 
             // Check if calling IO function from non-IO context

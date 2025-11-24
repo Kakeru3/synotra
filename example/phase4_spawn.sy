@@ -3,7 +3,7 @@ data message Greeting(val text: String)
 
 actor Worker(name: String) {
     io fun run() {
-        println("Worker ${name} started")
+        println("Worker started: ${name}")
     }
 }
 

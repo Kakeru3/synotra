@@ -330,6 +330,17 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     expr
                 }
             }),
+            // spawn(ActorType, args) special form
+            just(Token::Ident("spawn".to_string()))
+                .ignore_then(
+                    ident
+                        .then(expr.clone().separated_by(just(Token::Comma)).or_not())
+                        .delimited_by(just(Token::LParen), just(Token::RParen)),
+                )
+                .map(|(actor_type, args)| Expr::Spawn {
+                    actor_type,
+                    args: args.unwrap_or_default(),
+                }),
             ident.map(Expr::Variable),
             expr.clone()
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
@@ -427,8 +438,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             )
             .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
 
-        let compare = sum
-            .clone()
+        sum.clone()
             .then(
                 choice((
                     op(Token::EqEq).to(BinaryOp::Eq),
@@ -441,9 +451,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 .then(sum.clone())
                 .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
-
-        compare
+            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)))
     });
 
     let stmt = recursive(|stmt| {

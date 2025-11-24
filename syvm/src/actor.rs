@@ -175,7 +175,7 @@ impl Actor {
                             Value::List(mut list) => {
                                 match method.as_str() {
                                     "add" => {
-                                        if let Some(arg) = arg_vals.get(0) {
+                                        if let Some(arg) = arg_vals.first() {
                                             list.push(arg.clone());
                                             locals[*target] = Value::List(list); // Update the local
                                             Value::ConstBool(true)
@@ -187,7 +187,7 @@ impl Actor {
                                         }
                                     }
                                     "get" => {
-                                        if let Some(Value::ConstInt(idx)) = arg_vals.get(0) {
+                                        if let Some(Value::ConstInt(idx)) = arg_vals.first() {
                                             if *idx >= 0 && (*idx as usize) < list.len() {
                                                 list[*idx as usize].clone()
                                             } else {
@@ -207,7 +207,7 @@ impl Actor {
                                     "size" => Value::ConstInt(list.len() as i64),
                                     "isEmpty" => Value::ConstBool(list.is_empty()),
                                     "addAll" => {
-                                        if let Some(Value::List(other)) = arg_vals.get(0) {
+                                        if let Some(Value::List(other)) = arg_vals.first() {
                                             list.extend(other.clone());
                                             locals[*target] = Value::List(list);
                                             Value::ConstBool(true)
@@ -234,7 +234,7 @@ impl Actor {
                                 match method.as_str() {
                                     "put" => {
                                         if let (Some(key), Some(val)) =
-                                            (arg_vals.get(0), arg_vals.get(1))
+                                            (arg_vals.first(), arg_vals.get(1))
                                         {
                                             map.insert(key.clone(), val.clone());
                                             locals[*target] = Value::Map(map); // Update the local
@@ -245,7 +245,7 @@ impl Actor {
                                         }
                                     }
                                     "get" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             if let Some(val) = map.get(key) {
                                                 val.clone()
                                             } else {
@@ -259,7 +259,7 @@ impl Actor {
                                         }
                                     }
                                     "remove" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             if let Some(val) = map.remove(key) {
                                                 locals[*target] = Value::Map(map); // Update the local
                                                 val
@@ -275,7 +275,7 @@ impl Actor {
                                     }
                                     "size" => Value::ConstInt(map.len() as i64),
                                     "containsKey" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             Value::ConstBool(map.contains_key(key))
                                         } else {
                                             eprintln!("Runtime Error: Map.containsKey requires a key argument");
@@ -297,7 +297,7 @@ impl Actor {
                                         Value::List(vals)
                                     }
                                     "putAll" | "addAll" => {
-                                        if let Some(Value::Map(other)) = arg_vals.get(0) {
+                                        if let Some(Value::Map(other)) = arg_vals.first() {
                                             for (k, v) in other {
                                                 map.insert(k.clone(), v.clone());
                                             }
@@ -334,7 +334,7 @@ impl Actor {
                             Value::Set(mut set) => {
                                 match method.as_str() {
                                     "add" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             let inserted = set.insert(val.clone());
                                             locals[*target] = Value::Set(set); // Update the local
                                             Value::ConstBool(inserted)
@@ -346,7 +346,7 @@ impl Actor {
                                         }
                                     }
                                     "remove" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             let removed = set.remove(val);
                                             locals[*target] = Value::Set(set); // Update the local
                                             Value::ConstBool(removed)
@@ -358,7 +358,7 @@ impl Actor {
                                         }
                                     }
                                     "contains" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             Value::ConstBool(set.contains(val))
                                         } else {
                                             eprintln!(
@@ -376,7 +376,7 @@ impl Actor {
                                         Value::List(vals)
                                     }
                                     "addAll" => {
-                                        if let Some(Value::Set(other)) = arg_vals.get(0) {
+                                        if let Some(Value::Set(other)) = arg_vals.first() {
                                             set.extend(other.clone());
                                             locals[*target] = Value::Set(set);
                                             Value::ConstBool(true)
