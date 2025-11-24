@@ -1,0 +1,17 @@
+// This should FAIL - ActorRef references non-existent data message
+
+// This is just a regular class, not a data message
+class NotADataMessage()
+
+// This should fail because NotADataMessage is not a data message
+actor Worker(name: String, ref: ActorRef<NotADataMessage>) {
+    io fun process() {
+        println("This should not compile")
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("Should not run")
+    }
+}

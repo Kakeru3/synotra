@@ -74,7 +74,45 @@ fn check_type_compatibility(expected: &Type, actual: &Type) -> bool {
             }
             true
         }
+        (Type::ActorRef(t1), Type::ActorRef(t2)) => {
+            // ActorRef types are compatible if their message types are compatible
+            check_type_compatibility(t1, t2)
+        }
         _ => false,
+    }
+}
+
+// Validate that ActorRef types reference valid data messages
+fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String> {
+    match ty {
+        Type::ActorRef(msg_type) => {
+            // Check if the message type is a UserDefined type (data message name)
+            match &**msg_type {
+                Type::UserDefined(name) => {
+                    // Verify it's registered as a DataMessage in symbol table
+                    if let Some(Symbol::DataMessage(_)) = symbols.lookup(name) {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "ActorRef message type '{}' is not a valid data message",
+                            name
+                        ))
+                    }
+                }
+                _ => Err(format!(
+                    "ActorRef message type must be a data message name, found: {:?}",
+                    msg_type
+                )),
+            }
+        }
+        Type::Generic(_, args) => {
+            // Recursively validate generic type arguments
+            for arg in args {
+                validate_actorref_type(arg, symbols)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()), // Other types don't need ActorRef validation
     }
 }
 
@@ -133,15 +171,18 @@ pub fn analyze(program: &Program) -> Result<(), String> {
 fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), String> {
     symbols.enter_scope();
 
-    // Register params as variables
+    // Register actor parameters and validate ActorRef types
     for param in &actor.params {
         symbols.insert(
             param.name.clone(),
             Symbol::Variable(param.ty.clone(), false),
         );
+
+        // Validate ActorRef types in actor parameters
+        validate_actorref_type(&param.ty, symbols)?;
     }
 
-    // Register members
+    // Register actor members (fields and methods)
     for member in &actor.members {
         match member {
             ActorMember::Field(field) => {
