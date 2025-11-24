@@ -779,6 +779,22 @@ fn analyze_expr(
                 None => Err(format!("Undefined data message '{}'", name)),
             }
         }
+        Expr::Spawn { actor_type, args } => {
+            // Verify that the actor type exists
+            if symbols.lookup(actor_type).is_none() {
+                return Err(format!("Unknown actor type: {}", actor_type));
+            }
+
+            // TODO: Validate args match actor constructor signature
+            for arg in args {
+                analyze_expr(arg, symbols, is_io_context)?;
+            }
+
+            // spawn returns an ActorRef<ActorType>
+            Ok(Type::ActorRef(Box::new(Type::UserDefined(
+                actor_type.clone(),
+            ))))
+        }
         Expr::FieldAccess(target, field_name) => {
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
 

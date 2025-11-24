@@ -133,6 +133,10 @@ pub enum Expr {
         args: Vec<Expr>,          // Constructor arguments
         field_names: Vec<String>, // Field names in order
     },
+    Spawn {
+        actor_type: String, // Actor type to spawn
+        args: Vec<Expr>,    // Constructor arguments for the actor
+    },
 }
 
 #[derive(Debug, Clone)]

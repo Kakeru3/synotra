@@ -538,6 +538,22 @@ impl<'a> Codegen<'a> {
                 // TODO: Implement object-oriented Ask in Phase 4
                 Value::ConstInt(0)
             }
+            Expr::Spawn { actor_type, args } => {
+                // Generate argument values
+                let arg_values: Vec<Value> = args.iter().map(|arg| self.gen_expr(arg)).collect();
+
+                // Allocate local for the result ActorRef
+                let result_idx = self.get_or_alloc_local(&format!("_ref_{}", actor_type));
+
+                // Emit Spawn instruction
+                self.current_block_mut().instrs.push(Instruction::Spawn {
+                    result: result_idx,
+                    actor_type: actor_type.clone(),
+                    args: arg_values,
+                });
+
+                Value::Local(result_idx)
+            }
             Expr::Send {
                 target: _,
                 message: _,

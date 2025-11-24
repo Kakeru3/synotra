@@ -151,6 +151,48 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
         Token::Ident(name) => {
             let name = name.clone();
             *pos += 1;
+
+            // Check for spawn(ActorType, args)
+            if name == "spawn" && *pos < tokens.len() && tokens[*pos] == Token::LParen {
+                *pos += 1; // Skip '('
+
+                // Parse actor type (first argument)
+                if *pos < tokens.len() {
+                    if let Token::Ident(actor_type) = &tokens[*pos] {
+                        let actor_type = actor_type.clone();
+                        *pos += 1;
+
+                        // Parse arguments
+                        let mut args = Vec::new();
+                        if *pos < tokens.len() && tokens[*pos] == Token::Comma {
+                            *pos += 1; // Skip comma after actor type
+
+                            // Parse argument list
+                            loop {
+                                args.push(parse_comparison(tokens, pos)?);
+
+                                if *pos < tokens.len() && tokens[*pos] == Token::Comma {
+                                    *pos += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                        if *pos < tokens.len() && tokens[*pos] == Token::RParen {
+                            *pos += 1; // Skip ')'
+                            return Ok(Expr::Spawn { actor_type, args });
+                        } else {
+                            return Err("Expected ')' in spawn expression".to_string());
+                        }
+                    } else {
+                        return Err("Expected actor type after spawn(".to_string());
+                    }
+                } else {
+                    return Err("Unexpected end in spawn expression".to_string());
+                }
+            }
+
             Ok(Expr::Variable(name))
         }
         Token::LParen => {
