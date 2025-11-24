@@ -269,7 +269,7 @@ synotra/
 
 A VS Code extension for Synotra is available, providing syntax highlighting and language support:
 
-**[synotra-vscode](https://github.com/BlueGeckoJP/synotra-vscode)**
+**[synotra-vscode](https://github.com/synotra-lang/synotra-vscode)**
 
 Features:
 
