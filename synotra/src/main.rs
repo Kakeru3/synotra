@@ -59,8 +59,11 @@ fn main() {
                                     handlers.push(handler);
                                 }
                             }
+                            let field_names: Vec<String> =
+                                fields.iter().map(|f| f.name.clone()).collect();
                             ir_program.actors.push(IrActor {
                                 name: actor_def.name.clone(),
+                                fields: field_names,
                                 handlers,
                             });
                         }

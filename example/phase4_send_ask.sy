@@ -1,0 +1,26 @@
+// Test send and ask instructions
+data message Request(val text: String)
+data message Response(val result: Int)
+
+actor Computer(name: String) {
+    io fun receive(msg: Request) {
+        println("Computer ${name} processing: ${msg.text}")
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("Testing send and ask...")
+        
+        // Test spawn
+        var computer = spawn(Computer, "calc1")
+        
+        // Test send (fire and forget)
+        computer.send(Request("Calculate 42"))
+        
+        // Test ask (synchronous request/response)
+        var result = computer.ask(Request("What is 2+2?"))
+        
+        println("Done!")
+    }
+}

@@ -531,12 +531,18 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(res)
             }
-            Expr::Ask {
-                target: _,
-                message: _,
-            } => {
-                // TODO: Implement object-oriented Ask in Phase 4
-                Value::ConstInt(0)
+            Expr::Ask { target, message } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+                let result_idx = self.alloc_temp();
+
+                self.current_block_mut().instrs.push(Instruction::Ask {
+                    result: result_idx,
+                    target: target_val,
+                    message: msg_val,
+                });
+
+                Value::Local(result_idx)
             }
             Expr::Spawn { actor_type, args } => {
                 // Generate argument values
@@ -554,11 +560,15 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(result_idx)
             }
-            Expr::Send {
-                target: _,
-                message: _,
-            } => {
-                // TODO: Implement object-oriented Send in Phase 4
+            Expr::Send { target, message } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+
+                self.current_block_mut().instrs.push(Instruction::Send {
+                    target: target_val,
+                    message: msg_val,
+                });
+
                 Value::ConstInt(0)
             }
             Expr::FieldAccess(target, field_name) => {

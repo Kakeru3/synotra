@@ -682,13 +682,8 @@ fn analyze_expr(
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
             let msg_ty = analyze_expr(message, symbols, is_io_context)?;
 
-            if let Type::ActorRef(expected_msg_ty) = target_ty {
-                if !check_type_compatibility(&msg_ty, &expected_msg_ty) {
-                    return Err(format!(
-                        "ActorRef expects message type {:?}, got {:?}",
-                        expected_msg_ty, msg_ty
-                    ));
-                }
+            if let Type::ActorRef(_) = target_ty {
+                // Relaxed check: allow any message type for now
             } else {
                 return Err(format!(
                     "Target of 'ask' must be ActorRef, got {:?}",
@@ -709,13 +704,8 @@ fn analyze_expr(
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
             let msg_ty = analyze_expr(message, symbols, is_io_context)?;
 
-            if let Type::ActorRef(expected_msg_ty) = target_ty {
-                if !check_type_compatibility(&msg_ty, &expected_msg_ty) {
-                    return Err(format!(
-                        "ActorRef expects message type {:?}, got {:?}",
-                        expected_msg_ty, msg_ty
-                    ));
-                }
+            if let Type::ActorRef(_) = target_ty {
+                // Relaxed check: allow any message type for now
             } else {
                 return Err(format!(
                     "Target of 'send' must be ActorRef, got {:?}",

@@ -13,6 +13,7 @@ pub struct Actor {
     pub handlers: HashMap<String, IrHandler>, // Local function handlers
     pub busy_count: Arc<AtomicUsize>,
     pub completion_cond: Arc<(Mutex<bool>, Condvar)>,
+    pub actor_defs: Arc<HashMap<String, IrActor>>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ impl Actor {
         shutdown_signal: mpsc::Sender<()>,
         busy_count: Arc<AtomicUsize>,
         completion_cond: Arc<(Mutex<bool>, Condvar)>,
+        actor_defs: Arc<HashMap<String, IrActor>>,
     ) -> Self {
         // Build function handlers map from definition
         let mut handlers = HashMap::new();
@@ -47,6 +49,7 @@ impl Actor {
             handlers,
             busy_count,
             completion_cond,
+            actor_defs,
         }
     }
 
@@ -474,92 +477,88 @@ impl Actor {
                         }
                     }
 
-                    Instruction::Send { target, msg, args } => {
+                    Instruction::Send { target, message } => {
                         let target_val = self.resolve_value(target, &locals);
-                        let msg_val = self.resolve_value(msg, &locals);
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|a| self.resolve_value(a, &locals))
-                            .collect();
+                        let msg_val = self.resolve_value(message, &locals);
 
-                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) =
-                            (target_val, msg_val)
-                        {
+                        if let Value::ActorRef(actor_id) = target_val {
                             let router = self.router.read().unwrap();
-                            if let Some(tx) = router.get(&target_name) {
+                            if let Some(tx) = router.get(&actor_id) {
                                 let msg = Message {
-                                    name: msg_name,
-                                    args: arg_vals,
+                                    name: "receive".to_string(),
+                                    args: vec![msg_val],
                                     reply_to: None,
                                 };
 
                                 // Increment busy count
                                 self.busy_count.fetch_add(1, Ordering::SeqCst);
 
-                                // Unbounded channel send is non-blocking, so we can do it synchronously
+                                // Unbounded channel send is non-blocking
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!(
                                         "Runtime Error: Failed to send message to {}: {}",
-                                        target_name, e
+                                        actor_id, e
                                     );
                                     // Decrement if send failed
                                     self.busy_count.fetch_sub(1, Ordering::SeqCst);
                                 }
                             } else {
-                                println!("Runtime: Actor {} not found", target_name);
+                                println!("Runtime: Actor {} not found", actor_id);
                             }
                         }
                     }
                     Instruction::Ask {
                         result,
                         target,
-                        msg,
-                        args,
+                        message,
                     } => {
                         let target_val = self.resolve_value(target, &locals);
-                        let msg_val = self.resolve_value(msg, &locals);
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|a| self.resolve_value(a, &locals))
-                            .collect();
+                        let msg_val = self.resolve_value(message, &locals);
 
-                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) =
-                            (target_val, msg_val)
-                        {
+                        if let Value::ActorRef(actor_id) = target_val {
                             let router = self.router.read().unwrap();
-                            if let Some(tx) = router.get(&target_name) {
-                                // Create one-shot channel for reply
+                            if let Some(tx) = router.get(&actor_id) {
+                                // Create a channel for the reply
                                 let (reply_tx, reply_rx) = mpsc::channel();
 
                                 let msg = Message {
-                                    name: msg_name.clone(),
-                                    args: arg_vals,
+                                    name: "receive".to_string(),
+                                    args: vec![msg_val],
                                     reply_to: Some(reply_tx),
                                 };
 
                                 // Increment busy count
                                 self.busy_count.fetch_add(1, Ordering::SeqCst);
 
-                                // Send message
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!(
-                                        "Runtime Error: Failed to send ask to {}: {}",
-                                        target_name, e
+                                        "Runtime Error: Failed to send message to {}: {}",
+                                        actor_id, e
                                     );
                                     self.busy_count.fetch_sub(1, Ordering::SeqCst);
-                                    locals[*result] = Value::ConstInt(0);
+                                    locals[*result] = Value::ConstInt(0); // Error value
                                 } else {
-                                    // Async: Return Future immediately
-                                    let future = Value::Future(RuntimeFuture(Arc::new(
-                                        Mutex::new(FutureState::Pending(reply_rx)),
-                                    )));
-                                    locals[*result] = future;
+                                    // Wait for reply (Blocking ASK for now)
+                                    // TODO: Make this async/future-based
+                                    match reply_rx.recv() {
+                                        Ok(val) => {
+                                            locals[*result] = val;
+                                        }
+                                        Err(_) => {
+                                            eprintln!(
+                                                "Runtime Error: Failed to receive reply from {}",
+                                                actor_id
+                                            );
+                                            locals[*result] = Value::ConstInt(0);
+                                        }
+                                    }
                                 }
                             } else {
-                                println!("Runtime: Actor {} not found", target_name);
+                                println!("Runtime: Actor {} not found", actor_id);
                                 locals[*result] = Value::ConstInt(0);
                             }
                         } else {
+                            // Target is not an actor ref
                             locals[*result] = Value::ConstInt(0);
                         }
                     }
@@ -614,10 +613,57 @@ impl Actor {
                         actor_type,
                         args,
                     } => {
-                        // TODO: Implement spawn - requires runtime integration
-                        // For now, create a placeholder ActorRef
-                        let actor_id = format!("{}_placeholder", actor_type);
-                        locals[*result] = Value::ActorRef(actor_id);
+                        if let Some(def) = self.actor_defs.get(actor_type) {
+                            // Generate unique ID
+                            let id = format!(
+                                "{}_{}",
+                                actor_type,
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_nanos()
+                            );
+
+                            // Create channel
+                            let (tx, rx) = mpsc::channel();
+
+                            // Add to router
+                            {
+                                let mut router = self.router.write().unwrap();
+                                router.insert(id.clone(), tx);
+                            }
+
+                            // Create actor
+                            let mut new_actor = Actor::new(
+                                def.clone(),
+                                rx,
+                                self.router.clone(),
+                                self.shutdown_signal.clone(),
+                                self.busy_count.clone(),
+                                self.completion_cond.clone(),
+                                self.actor_defs.clone(),
+                            );
+
+                            // Initialize state
+                            let mut initial_state = HashMap::new();
+                            for (i, field) in def.fields.iter().enumerate() {
+                                if let Some(val) = args.get(i) {
+                                    let resolved_val = self.resolve_value(val, &locals);
+                                    initial_state.insert(field.clone(), resolved_val);
+                                }
+                            }
+                            new_actor.state = initial_state;
+
+                            // Spawn thread
+                            std::thread::spawn(move || {
+                                new_actor.run();
+                            });
+
+                            locals[*result] = Value::ActorRef(id);
+                        } else {
+                            println!("Runtime Error: Unknown actor type {}", actor_type);
+                            locals[*result] = Value::ConstInt(0);
+                        }
                     }
                     Instruction::Exit => {
                         // Signal shutdown

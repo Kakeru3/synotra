@@ -10,6 +10,7 @@ pub struct IrProgram {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrActor {
     pub name: String,
+    pub fields: Vec<String>,
     pub handlers: Vec<IrHandler>,
 }
 
@@ -53,17 +54,6 @@ pub enum Instruction {
         method: String,
         args: Vec<Value>,
     },
-    Send {
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
-    Ask {
-        result: usize, // Local index
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
     SwLoad {
         result: usize,
         collection: usize,
@@ -88,6 +78,15 @@ pub enum Instruction {
         result: usize,
         actor_type: String,
         args: Vec<Value>,
+    },
+    Send {
+        target: Value,
+        message: Value,
+    },
+    Ask {
+        result: usize,
+        target: Value,
+        message: Value,
     },
     Exit,
 }
