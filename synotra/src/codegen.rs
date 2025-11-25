@@ -126,7 +126,17 @@ impl<'a> Codegen<'a> {
             params: func
                 .params
                 .iter()
-                .map(|p| (p.name.clone(), format!("{:?}", p.ty)))
+                .map(|p| {
+                    let type_name = match &p.ty {
+                        Type::UserDefined(name) => name.clone(),
+                        Type::Int => "Int".to_string(),
+                        Type::String => "String".to_string(),
+                        Type::Bool => "Bool".to_string(),
+                        Type::Unit => "Unit".to_string(),
+                        _ => format!("{:?}", p.ty),
+                    };
+                    (p.name.clone(), type_name)
+                })
                 .collect(),
             local_count: self.next_local_id,
             blocks: self.blocks.clone(),

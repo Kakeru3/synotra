@@ -204,9 +204,10 @@ All examples are in the `example/` directory:
 ./run.sh example/01_hello_world.sy    # Hello World
 ./run.sh example/02_control_flow.sy   # If/else, loops
 ./run.sh example/03_variables.sy      # Variables and interpolation
-./run.sh example/04_messages.sy       # Data messages and field access
-./run.sh example/05_actors.sy         # Actor spawning and messaging
-./run.sh example/06_functions.sy      # Pure function definitions
+./run.sh example/04_functions.sy      # Pure function definitions
+./run.sh example/05_messages.sy       # Data messages and field access
+./run.sh example/06_actors.sy         # Actor spawning and messaging
+./run.sh example/07_advanced_actors.sy # Advanced actor communication (ActorRef)
 ```
 
 ## Project Structure

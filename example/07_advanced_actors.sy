@@ -1,0 +1,54 @@
+// Advanced Actor Communication - Passing ActorRefs in messages
+
+// Response message sent back to the client
+data message Response(val result: String)
+
+// Request message containing the sender's ActorRef for reply
+data message Request(val query: String, val replyTo: ActorRef<Client>)
+
+// Start message to initiate the client
+data message Start(val server: ActorRef<Server>, val selfRef: ActorRef<Client>)
+
+// Server actor handles requests and replies to the specified actor
+actor Server(name: String) {
+    io fun handle(req: Request) {
+        println("Server received query: '${req.query}'")
+        
+        // Simulate processing
+        var result = "Processed: ${req.query}"
+        
+        // Send response back to the client using the passed ActorRef
+        println("Server sending response to client...")
+        req.replyTo.send(Response(result))
+    }
+}
+
+// Client actor sends a request and handles the response
+actor Client(clientId: Int) {
+    // Handler for Response messages
+    io fun receive(res: Response) {
+        println("Client ${clientId} received result: ${res.result}")
+    }
+    
+    // Handler for Start message
+    io fun run(msg: Start) {
+        println("Client ${clientId} sending request...")
+        msg.server.send(Request("Hello Server!", msg.selfRef))
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("--- Starting Advanced Actor Example ---")
+        
+        // Spawn server
+        var server = spawn(Server, "Primary")
+        
+        // Spawn client
+        var client = spawn(Client, 1)
+        
+        // Start interaction by sending a Start message
+        // We pass the client's own reference so it can send it to the server
+        client.send(Start(server, client))
+    }
+}

@@ -66,11 +66,25 @@ impl Actor {
 
     fn handle_message(&mut self, msg: Message) {
         // Find handler
+        // Find handler by matching message name (which is Type name) with the first parameter type of the handler
+        // Or fallback to matching handler name (for "run" etc.)
         let handler = self
             .definition
             .handlers
             .iter()
-            .find(|h| h.name == msg.name)
+            .find(|h| {
+                // If message has arguments (it's a data message), try to match by parameter type
+                if !msg.args.is_empty() {
+                    if let Some((_, param_type)) = h.params.first() {
+                        if param_type == &msg.name {
+                            return true;
+                        }
+                    }
+                }
+
+                // Fallback: match handler name
+                h.name == msg.name
+            })
             .cloned();
 
         if let Some(handler) = handler {
@@ -94,6 +108,16 @@ impl Actor {
             // If reply is expected, send default value
             if let Some(reply_tx) = msg.reply_to {
                 let _ = reply_tx.send(Value::ConstInt(0));
+            }
+
+            // Decrement busy count even if no handler found
+            let prev = self.busy_count.fetch_sub(1, Ordering::SeqCst);
+            if prev == 1 {
+                // Count dropped to 0, signal completion
+                let (lock, cvar) = &*self.completion_cond;
+                let mut finished = lock.lock().unwrap();
+                *finished = true;
+                cvar.notify_all();
             }
         }
     }
@@ -484,8 +508,14 @@ impl Actor {
                         if let Value::ActorRef(actor_id) = target_val {
                             let router = self.router.read().unwrap();
                             if let Some(tx) = router.get(&actor_id) {
+                                let msg_name = if let Value::Message { type_name, .. } = &msg_val {
+                                    type_name.clone()
+                                } else {
+                                    "receive".to_string()
+                                };
+
                                 let msg = Message {
-                                    name: "receive".to_string(),
+                                    name: msg_name,
                                     args: vec![msg_val],
                                     reply_to: None,
                                 };
@@ -521,8 +551,14 @@ impl Actor {
                                 // Create a channel for the reply
                                 let (reply_tx, reply_rx) = mpsc::channel();
 
+                                let msg_name = if let Value::Message { type_name, .. } = &msg_val {
+                                    type_name.clone()
+                                } else {
+                                    "receive".to_string()
+                                };
+
                                 let msg = Message {
-                                    name: "receive".to_string(),
+                                    name: msg_name,
                                     args: vec![msg_val],
                                     reply_to: Some(reply_tx),
                                 };
