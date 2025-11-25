@@ -118,8 +118,6 @@ actor main(name: String) {
 
 ### Functions
 
-Pure functions are defined with `fun`. If they return a value, the return type is **mandatory**.
-
 ```synotra
 // Pure function with return value
 fun add(a: Int, b: Int): Int {
@@ -131,8 +129,6 @@ fun log(msg: String) {
     // ...
 }
 ```
-
-IO functions are defined with `io fun`. They perform side effects and **do not have a return type**.
 
 ```synotra
 io fun printMessage(msg: String) {
