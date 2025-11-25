@@ -116,28 +116,40 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
     }
 }
 
-pub fn analyze(program: &Program) -> Result<(), String> {
+pub fn analyze(program: &Program) -> Result<SymbolTable, String> {
     let mut symbols = SymbolTable::new();
 
     // 1. Register top-level definitions
+    // First pass: Register all data messages
+    for def in &program.definitions {
+        if let Definition::DataMessage(data_def) = def {
+            let fields: Vec<(String, Type)> = data_def
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.field_type.clone()))
+                .collect();
+            symbols.insert(data_def.name.clone(), Symbol::DataMessage(fields));
+        }
+    }
+
+    // Second pass: Register actors and their types
+    for def in &program.definitions {
+        if let Definition::Actor(actor_def) = def {
+            symbols.insert(
+                actor_def.name.clone(),
+                Symbol::Actor(actor_def.name.clone()),
+            );
+        }
+    }
+
+    // 1. Register top-level definitions (excluding Data and Actor which are handled above)
     for def in &program.definitions {
         match def {
-            Definition::Actor(actor) => {
-                symbols.insert(actor.name.clone(), Symbol::Actor(actor.name.clone()));
-            }
+            Definition::Actor(_) => { /* Handled in second pass */ }
             Definition::Message(msg) => {
                 symbols.insert(msg.name.clone(), Symbol::Message(msg.name.clone()));
             }
-            Definition::DataMessage(data_msg) => {
-                // Collect fields with their types for registration
-                let fields: Vec<(String, Type)> = data_msg
-                    .fields
-                    .iter()
-                    .map(|f| (f.name.clone(), f.field_type.clone()))
-                    .collect();
-
-                symbols.insert(data_msg.name.clone(), Symbol::DataMessage(fields));
-            }
+            Definition::DataMessage(_) => { /* Handled in first pass */ }
             Definition::Function(func) => {
                 let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
                 symbols.insert(
@@ -165,7 +177,8 @@ pub fn analyze(program: &Program) -> Result<(), String> {
         }
     }
 
-    Ok(())
+    // Return the symbol table
+    Ok(symbols)
 }
 
 fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), String> {
@@ -322,23 +335,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 analyze_expr(e, symbols, is_io_context)?;
             }
         }
-        Stmt::Send {
-            target: _,  // Actor name (identifier) - no need to analyze
-            message: _, // Handler name (identifier) - no need to analyze
-            args,
-        } => {
-            // Check: send() can only be used in IO context
-            if !is_io_context {
-                return Err(
-                    "Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string(),
-                );
-            }
-
-            // Analyze arguments
-            for arg in args {
-                analyze_expr(arg, symbols, is_io_context)?;
-            }
-        }
+        // Stmt::Send removed from AST
         Stmt::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
@@ -382,7 +379,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             let collection_ty = analyze_expr(collection, symbols, is_io_context)?;
             let item_ty = match collection_ty {
                 Type::Generic(name, args) if name == "List" || name == "Set" => {
-                    if args.len() >= 1 {
+                    if !args.is_empty() {
                         args[0].clone()
                     } else {
                         return Err("Collection must have a type argument".to_string());
@@ -500,161 +497,148 @@ fn analyze_expr(
             };
 
             // Collection method inference
-            match &target_ty {
-                Type::Generic(name, type_args) => {
-                    if name == "List" {
-                        match method.as_str() {
-                            "get" => {
-                                if type_args.len() >= 1 {
-                                    return Ok(type_args[0].clone());
-                                }
+            if let Type::Generic(name, type_args) = &target_ty {
+                if name == "List" {
+                    match method.as_str() {
+                        "get" => {
+                            if !type_args.is_empty() {
+                                return Ok(type_args[0].clone());
                             }
-                            "add" => {
-                                if type_args.len() >= 1 {
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                            if let Expr::Variable(var_name) = target.as_ref() {
-                                                let new_ty = Type::Generic(
-                                                    name.clone(),
-                                                    vec![arg_ty.clone()],
-                                                );
-                                                symbols.update(
-                                                    var_name,
-                                                    Symbol::Variable(new_ty, true),
-                                                ); // Assuming mutable
-                                            }
-                                        }
-                                    }
-                                }
-                                return Ok(Type::Bool);
-                            }
-                            "size" => return Ok(Type::Int),
-                            "isEmpty" => return Ok(Type::Bool),
-                            "addAll" | "clear" => return Ok(Type::Bool),
-                            _ => {}
                         }
-                    } else if name == "Map" {
-                        match method.as_str() {
-                            "get" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[1].clone());
-                                }
-                            }
-                            "keys" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[0].clone()],
-                                    ));
-                                }
-                            }
-                            "values" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[1].clone()],
-                                    ));
-                                }
-                            }
-                            "entrySet" => {
-                                if type_args.len() >= 2 {
-                                    let entry_type = Type::Generic(
-                                        "Entry".to_string(),
-                                        vec![type_args[0].clone(), type_args[1].clone()],
-                                    );
-                                    return Ok(Type::Generic("List".to_string(), vec![entry_type]));
-                                }
-                            }
-                            "put" => {
-                                // Infer key and value types if currently Unknown
-                                if type_args.len() >= 2 {
-                                    let mut new_args = type_args.clone();
-                                    let mut changed = false;
-
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            new_args[0] =
-                                                analyze_expr(arg, symbols, is_io_context)?;
-                                            changed = true;
-                                        }
-                                    }
-                                    if let Type::Unknown = type_args[1] {
-                                        if let Some(arg) = args.get(1) {
-                                            new_args[1] =
-                                                analyze_expr(arg, symbols, is_io_context)?;
-                                            changed = true;
-                                        }
-                                    }
-
-                                    if changed {
+                        "add" => {
+                            if !type_args.is_empty() {
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
                                         if let Expr::Variable(var_name) = target.as_ref() {
-                                            let new_ty = Type::Generic(name.clone(), new_args);
+                                            let new_ty =
+                                                Type::Generic(name.clone(), vec![arg_ty.clone()]);
+                                            symbols
+                                                .update(var_name, Symbol::Variable(new_ty, true));
+                                            // Assuming mutable
+                                        }
+                                    }
+                                }
+                            }
+                            return Ok(Type::Bool);
+                        }
+                        "size" => return Ok(Type::Int),
+                        "isEmpty" => return Ok(Type::Bool),
+                        "addAll" | "clear" => return Ok(Type::Bool),
+                        _ => {}
+                    }
+                } else if name == "Map" {
+                    match method.as_str() {
+                        "get" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[1].clone());
+                            }
+                        }
+                        "keys" => {
+                            if type_args.len() >= 2 {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[0].clone()],
+                                ));
+                            }
+                        }
+                        "values" => {
+                            if type_args.len() >= 2 {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[1].clone()],
+                                ));
+                            }
+                        }
+                        "entrySet" => {
+                            if type_args.len() >= 2 {
+                                let entry_type = Type::Generic(
+                                    "Entry".to_string(),
+                                    vec![type_args[0].clone(), type_args[1].clone()],
+                                );
+                                return Ok(Type::Generic("List".to_string(), vec![entry_type]));
+                            }
+                        }
+                        "put" => {
+                            // Infer key and value types if currently Unknown
+                            if type_args.len() >= 2 {
+                                let mut new_args = type_args.clone();
+                                let mut changed = false;
+
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        new_args[0] = analyze_expr(arg, symbols, is_io_context)?;
+                                        changed = true;
+                                    }
+                                }
+                                if let Type::Unknown = type_args[1] {
+                                    if let Some(arg) = args.get(1) {
+                                        new_args[1] = analyze_expr(arg, symbols, is_io_context)?;
+                                        changed = true;
+                                    }
+                                }
+
+                                if changed {
+                                    if let Expr::Variable(var_name) = target.as_ref() {
+                                        let new_ty = Type::Generic(name.clone(), new_args);
+                                        symbols.update(var_name, Symbol::Variable(new_ty, true));
+                                    }
+                                }
+                            }
+                            return Ok(Type::Bool);
+                        }
+                        "remove" | "containsKey" | "contains" => return Ok(Type::Bool),
+                        "size" => return Ok(Type::Int),
+                        "putAll" | "clear" => return Ok(Type::Bool),
+                        _ => {}
+                    }
+                } else if name == "Set" {
+                    // println!("DEBUG: Analyzing Set method '{}'", method);
+                    match method.as_str() {
+                        "add" => {
+                            // Infer element type if currently Unknown
+                            if !type_args.is_empty() {
+                                if let Type::Unknown = type_args[0] {
+                                    if let Some(arg) = args.first() {
+                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                        if let Expr::Variable(var_name) = target.as_ref() {
+                                            let new_ty =
+                                                Type::Generic(name.clone(), vec![arg_ty.clone()]);
                                             symbols
                                                 .update(var_name, Symbol::Variable(new_ty, true));
                                         }
                                     }
                                 }
-                                return Ok(Type::Bool);
                             }
-                            "remove" | "containsKey" | "contains" => return Ok(Type::Bool),
-                            "size" => return Ok(Type::Int),
-                            "putAll" | "clear" => return Ok(Type::Bool),
-                            _ => {}
+                            return Ok(Type::Bool);
                         }
-                    } else if name == "Set" {
-                        // println!("DEBUG: Analyzing Set method '{}'", method);
-                        match method.as_str() {
-                            "add" => {
-                                // Infer element type if currently Unknown
-                                if type_args.len() >= 1 {
-                                    if let Type::Unknown = type_args[0] {
-                                        if let Some(arg) = args.get(0) {
-                                            let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                            if let Expr::Variable(var_name) = target.as_ref() {
-                                                let new_ty = Type::Generic(
-                                                    name.clone(),
-                                                    vec![arg_ty.clone()],
-                                                );
-                                                symbols.update(
-                                                    var_name,
-                                                    Symbol::Variable(new_ty, true),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                return Ok(Type::Bool);
+                        "remove" | "contains" | "addAll" | "clear" => return Ok(Type::Bool),
+                        "size" => return Ok(Type::Int),
+                        "values" => {
+                            if !type_args.is_empty() {
+                                return Ok(Type::Generic(
+                                    "List".to_string(),
+                                    vec![type_args[0].clone()],
+                                ));
                             }
-                            "remove" | "contains" | "addAll" | "clear" => return Ok(Type::Bool),
-                            "size" => return Ok(Type::Int),
-                            "values" => {
-                                if type_args.len() >= 1 {
-                                    return Ok(Type::Generic(
-                                        "List".to_string(),
-                                        vec![type_args[0].clone()],
-                                    ));
-                                }
-                            }
-                            _ => {}
                         }
-                    } else if name == "Entry" {
-                        match method.as_str() {
-                            "key" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[0].clone());
-                                }
+                        _ => {}
+                    }
+                } else if name == "Entry" {
+                    match method.as_str() {
+                        "key" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[0].clone());
                             }
-                            "value" => {
-                                if type_args.len() >= 2 {
-                                    return Ok(type_args[1].clone());
-                                }
-                            }
-                            _ => {}
                         }
+                        "value" => {
+                            if type_args.len() >= 2 {
+                                return Ok(type_args[1].clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
 
             // Check if calling IO function from non-IO context
@@ -687,11 +671,7 @@ fn analyze_expr(
 
             Ok(Type::Int)
         }
-        Expr::Ask {
-            target: _,  // Actor name (identifier) - no need to analyze
-            message: _, // Handler name (identifier) - no need to analyze
-            args,
-        } => {
+        Expr::Ask { target, message } => {
             // Check: ask() can only be used in IO context
             if !is_io_context {
                 return Err(
@@ -699,11 +679,122 @@ fn analyze_expr(
                 );
             }
 
-            // Analyze arguments
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+
+            if let Type::ActorRef(_) = target_ty {
+                // Relaxed check: allow any message type for now
+            } else {
+                return Err(format!(
+                    "Target of 'ask' must be ActorRef, got {:?}",
+                    target_ty
+                ));
+            }
+
+            Ok(Type::Int) // ask returns a value (placeholder)
+        }
+        Expr::Send { target, message } => {
+            // Check: send() can only be used in IO context
+            if !is_io_context {
+                return Err(
+                    "Cannot use 'send' in a pure function. Use 'io fun' instead.".to_string(),
+                );
+            }
+
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+
+            if let Type::ActorRef(_) = target_ty {
+                // Relaxed check: allow any message type for now
+            } else {
+                return Err(format!(
+                    "Target of 'send' must be ActorRef, got {:?}",
+                    target_ty
+                ));
+            }
+
+            Ok(Type::Int) // send returns Unit/Int (0)
+        }
+        Expr::Construct {
+            name,
+            args,
+            field_names: _,
+        } => {
+            // Validate that 'name' is a registered data message
+            match symbols.lookup(name) {
+                Some(Symbol::DataMessage(fields)) => {
+                    // Clone fields to avoid borrow checker issues
+                    let fields = fields.clone();
+
+                    // Validate argument count
+                    if args.len() != fields.len() {
+                        return Err(format!(
+                            "Data message '{}' expects {} arguments, got {}",
+                            name,
+                            fields.len(),
+                            args.len()
+                        ));
+                    }
+
+                    // Analyze and type-check each argument
+                    for (i, arg) in args.iter().enumerate() {
+                        let arg_type = analyze_expr(arg, symbols, is_io_context)?;
+                        let expected_type = &fields[i].1;
+
+                        if !check_type_compatibility(&arg_type, expected_type) {
+                            return Err(format!(
+                                "Data message '{}' field '{}' expects type {:?}, got {:?}",
+                                name, fields[i].0, expected_type, arg_type
+                            ));
+                        }
+                    }
+
+                    // Return the constructed message type
+                    Ok(Type::UserDefined(name.clone()))
+                }
+                Some(_) => Err(format!("'{}' is not a data message", name)),
+                None => Err(format!("Undefined data message '{}'", name)),
+            }
+        }
+        Expr::Spawn { actor_type, args } => {
+            // Verify that the actor type exists
+            if symbols.lookup(actor_type).is_none() {
+                return Err(format!("Unknown actor type: {}", actor_type));
+            }
+
+            // TODO: Validate args match actor constructor signature
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
             }
-            Ok(Type::Int) // ask returns a value
+
+            // spawn returns an ActorRef<ActorType>
+            Ok(Type::ActorRef(Box::new(Type::UserDefined(
+                actor_type.clone(),
+            ))))
+        }
+        Expr::FieldAccess(target, field_name) => {
+            let target_ty = analyze_expr(target, symbols, is_io_context)?;
+
+            match target_ty {
+                Type::UserDefined(type_name) => match symbols.lookup(&type_name) {
+                    Some(Symbol::DataMessage(fields)) => {
+                        for (fname, fty) in fields {
+                            if fname == field_name {
+                                return Ok(fty.clone());
+                            }
+                        }
+                        Err(format!(
+                            "Field '{}' not found in type '{}'",
+                            field_name, type_name
+                        ))
+                    }
+                    _ => Err(format!("Type '{}' does not have fields", type_name)),
+                },
+                _ => Err(format!(
+                    "Cannot access field '{}' on type {:?}",
+                    field_name, target_ty
+                )),
+            }
         }
     }
 }

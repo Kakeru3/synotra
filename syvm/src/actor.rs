@@ -13,6 +13,7 @@ pub struct Actor {
     pub handlers: HashMap<String, IrHandler>, // Local function handlers
     pub busy_count: Arc<AtomicUsize>,
     pub completion_cond: Arc<(Mutex<bool>, Condvar)>,
+    pub actor_defs: Arc<HashMap<String, IrActor>>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ impl Actor {
         shutdown_signal: mpsc::Sender<()>,
         busy_count: Arc<AtomicUsize>,
         completion_cond: Arc<(Mutex<bool>, Condvar)>,
+        actor_defs: Arc<HashMap<String, IrActor>>,
     ) -> Self {
         // Build function handlers map from definition
         let mut handlers = HashMap::new();
@@ -47,6 +49,7 @@ impl Actor {
             handlers,
             busy_count,
             completion_cond,
+            actor_defs,
         }
     }
 
@@ -175,7 +178,7 @@ impl Actor {
                             Value::List(mut list) => {
                                 match method.as_str() {
                                     "add" => {
-                                        if let Some(arg) = arg_vals.get(0) {
+                                        if let Some(arg) = arg_vals.first() {
                                             list.push(arg.clone());
                                             locals[*target] = Value::List(list); // Update the local
                                             Value::ConstBool(true)
@@ -187,7 +190,7 @@ impl Actor {
                                         }
                                     }
                                     "get" => {
-                                        if let Some(Value::ConstInt(idx)) = arg_vals.get(0) {
+                                        if let Some(Value::ConstInt(idx)) = arg_vals.first() {
                                             if *idx >= 0 && (*idx as usize) < list.len() {
                                                 list[*idx as usize].clone()
                                             } else {
@@ -207,7 +210,7 @@ impl Actor {
                                     "size" => Value::ConstInt(list.len() as i64),
                                     "isEmpty" => Value::ConstBool(list.is_empty()),
                                     "addAll" => {
-                                        if let Some(Value::List(other)) = arg_vals.get(0) {
+                                        if let Some(Value::List(other)) = arg_vals.first() {
                                             list.extend(other.clone());
                                             locals[*target] = Value::List(list);
                                             Value::ConstBool(true)
@@ -234,7 +237,7 @@ impl Actor {
                                 match method.as_str() {
                                     "put" => {
                                         if let (Some(key), Some(val)) =
-                                            (arg_vals.get(0), arg_vals.get(1))
+                                            (arg_vals.first(), arg_vals.get(1))
                                         {
                                             map.insert(key.clone(), val.clone());
                                             locals[*target] = Value::Map(map); // Update the local
@@ -245,7 +248,7 @@ impl Actor {
                                         }
                                     }
                                     "get" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             if let Some(val) = map.get(key) {
                                                 val.clone()
                                             } else {
@@ -259,7 +262,7 @@ impl Actor {
                                         }
                                     }
                                     "remove" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             if let Some(val) = map.remove(key) {
                                                 locals[*target] = Value::Map(map); // Update the local
                                                 val
@@ -275,7 +278,7 @@ impl Actor {
                                     }
                                     "size" => Value::ConstInt(map.len() as i64),
                                     "containsKey" => {
-                                        if let Some(key) = arg_vals.get(0) {
+                                        if let Some(key) = arg_vals.first() {
                                             Value::ConstBool(map.contains_key(key))
                                         } else {
                                             eprintln!("Runtime Error: Map.containsKey requires a key argument");
@@ -297,7 +300,7 @@ impl Actor {
                                         Value::List(vals)
                                     }
                                     "putAll" | "addAll" => {
-                                        if let Some(Value::Map(other)) = arg_vals.get(0) {
+                                        if let Some(Value::Map(other)) = arg_vals.first() {
                                             for (k, v) in other {
                                                 map.insert(k.clone(), v.clone());
                                             }
@@ -334,7 +337,7 @@ impl Actor {
                             Value::Set(mut set) => {
                                 match method.as_str() {
                                     "add" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             let inserted = set.insert(val.clone());
                                             locals[*target] = Value::Set(set); // Update the local
                                             Value::ConstBool(inserted)
@@ -346,7 +349,7 @@ impl Actor {
                                         }
                                     }
                                     "remove" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             let removed = set.remove(val);
                                             locals[*target] = Value::Set(set); // Update the local
                                             Value::ConstBool(removed)
@@ -358,7 +361,7 @@ impl Actor {
                                         }
                                     }
                                     "contains" => {
-                                        if let Some(val) = arg_vals.get(0) {
+                                        if let Some(val) = arg_vals.first() {
                                             Value::ConstBool(set.contains(val))
                                         } else {
                                             eprintln!(
@@ -376,7 +379,7 @@ impl Actor {
                                         Value::List(vals)
                                     }
                                     "addAll" => {
-                                        if let Some(Value::Set(other)) = arg_vals.get(0) {
+                                        if let Some(Value::Set(other)) = arg_vals.first() {
                                             set.extend(other.clone());
                                             locals[*target] = Value::Set(set);
                                             Value::ConstBool(true)
@@ -474,92 +477,191 @@ impl Actor {
                         }
                     }
 
-                    Instruction::Send { target, msg, args } => {
+                    Instruction::Send { target, message } => {
                         let target_val = self.resolve_value(target, &locals);
-                        let msg_val = self.resolve_value(msg, &locals);
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|a| self.resolve_value(a, &locals))
-                            .collect();
+                        let msg_val = self.resolve_value(message, &locals);
 
-                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) =
-                            (target_val, msg_val)
-                        {
+                        if let Value::ActorRef(actor_id) = target_val {
                             let router = self.router.read().unwrap();
-                            if let Some(tx) = router.get(&target_name) {
+                            if let Some(tx) = router.get(&actor_id) {
                                 let msg = Message {
-                                    name: msg_name,
-                                    args: arg_vals,
+                                    name: "receive".to_string(),
+                                    args: vec![msg_val],
                                     reply_to: None,
                                 };
 
                                 // Increment busy count
                                 self.busy_count.fetch_add(1, Ordering::SeqCst);
 
-                                // Unbounded channel send is non-blocking, so we can do it synchronously
+                                // Unbounded channel send is non-blocking
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!(
                                         "Runtime Error: Failed to send message to {}: {}",
-                                        target_name, e
+                                        actor_id, e
                                     );
                                     // Decrement if send failed
                                     self.busy_count.fetch_sub(1, Ordering::SeqCst);
                                 }
                             } else {
-                                println!("Runtime: Actor {} not found", target_name);
+                                println!("Runtime: Actor {} not found", actor_id);
                             }
                         }
                     }
                     Instruction::Ask {
                         result,
                         target,
-                        msg,
-                        args,
+                        message,
                     } => {
                         let target_val = self.resolve_value(target, &locals);
-                        let msg_val = self.resolve_value(msg, &locals);
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|a| self.resolve_value(a, &locals))
-                            .collect();
+                        let msg_val = self.resolve_value(message, &locals);
 
-                        if let (Value::ConstString(target_name), Value::ConstString(msg_name)) =
-                            (target_val, msg_val)
-                        {
+                        if let Value::ActorRef(actor_id) = target_val {
                             let router = self.router.read().unwrap();
-                            if let Some(tx) = router.get(&target_name) {
-                                // Create one-shot channel for reply
+                            if let Some(tx) = router.get(&actor_id) {
+                                // Create a channel for the reply
                                 let (reply_tx, reply_rx) = mpsc::channel();
 
                                 let msg = Message {
-                                    name: msg_name.clone(),
-                                    args: arg_vals,
+                                    name: "receive".to_string(),
+                                    args: vec![msg_val],
                                     reply_to: Some(reply_tx),
                                 };
 
                                 // Increment busy count
                                 self.busy_count.fetch_add(1, Ordering::SeqCst);
 
-                                // Send message
                                 if let Err(e) = tx.send(msg) {
                                     eprintln!(
-                                        "Runtime Error: Failed to send ask to {}: {}",
-                                        target_name, e
+                                        "Runtime Error: Failed to send message to {}: {}",
+                                        actor_id, e
                                     );
                                     self.busy_count.fetch_sub(1, Ordering::SeqCst);
-                                    locals[*result] = Value::ConstInt(0);
+                                    locals[*result] = Value::ConstInt(0); // Error value
                                 } else {
-                                    // Async: Return Future immediately
-                                    let future = Value::Future(RuntimeFuture(Arc::new(
-                                        Mutex::new(FutureState::Pending(reply_rx)),
-                                    )));
-                                    locals[*result] = future;
+                                    // Wait for reply (Blocking ASK for now)
+                                    // TODO: Make this async/future-based
+                                    match reply_rx.recv() {
+                                        Ok(val) => {
+                                            locals[*result] = val;
+                                        }
+                                        Err(_) => {
+                                            eprintln!(
+                                                "Runtime Error: Failed to receive reply from {}",
+                                                actor_id
+                                            );
+                                            locals[*result] = Value::ConstInt(0);
+                                        }
+                                    }
                                 }
                             } else {
-                                println!("Runtime: Actor {} not found", target_name);
+                                println!("Runtime: Actor {} not found", actor_id);
                                 locals[*result] = Value::ConstInt(0);
                             }
                         } else {
+                            // Target is not an actor ref
+                            locals[*result] = Value::ConstInt(0);
+                        }
+                    }
+                    Instruction::CreateMessage {
+                        result,
+                        type_name,
+                        field_values,
+                    } => {
+                        // Resolve all field values
+                        let mut fields = HashMap::new();
+                        for (field_name, val) in field_values.iter() {
+                            let resolved = self.resolve_value(val, &locals);
+                            fields.insert(field_name.clone(), Box::new(resolved));
+                        }
+
+                        // Create the message value
+                        let msg_val = Value::Message {
+                            type_name: type_name.clone(),
+                            fields,
+                        };
+
+                        locals[*result] = msg_val;
+                    }
+                    Instruction::GetField {
+                        result,
+                        target,
+                        field_name,
+                    } => {
+                        let target_val = self.resolve_value(target, &locals);
+
+                        let field_val = match &target_val {
+                            Value::Message { fields, .. } => {
+                                // Try to get the field by name
+                                fields
+                                    .get(field_name)
+                                    .map(|boxed_val| *boxed_val.clone())
+                                    .unwrap_or(Value::ConstInt(0))
+                            }
+                            _ => {
+                                println!(
+                                    "Warning: GetField on non-message value: {:?}",
+                                    target_val
+                                );
+                                Value::ConstInt(0) // Target is not a message
+                            }
+                        };
+
+                        locals[*result] = field_val;
+                    }
+                    Instruction::Spawn {
+                        result,
+                        actor_type,
+                        args,
+                    } => {
+                        if let Some(def) = self.actor_defs.get(actor_type) {
+                            // Generate unique ID
+                            let id = format!(
+                                "{}_{}",
+                                actor_type,
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_nanos()
+                            );
+
+                            // Create channel
+                            let (tx, rx) = mpsc::channel();
+
+                            // Add to router
+                            {
+                                let mut router = self.router.write().unwrap();
+                                router.insert(id.clone(), tx);
+                            }
+
+                            // Create actor
+                            let mut new_actor = Actor::new(
+                                def.clone(),
+                                rx,
+                                self.router.clone(),
+                                self.shutdown_signal.clone(),
+                                self.busy_count.clone(),
+                                self.completion_cond.clone(),
+                                self.actor_defs.clone(),
+                            );
+
+                            // Initialize state
+                            let mut initial_state = HashMap::new();
+                            for (i, field) in def.fields.iter().enumerate() {
+                                if let Some(val) = args.get(i) {
+                                    let resolved_val = self.resolve_value(val, &locals);
+                                    initial_state.insert(field.clone(), resolved_val);
+                                }
+                            }
+                            new_actor.state = initial_state;
+
+                            // Spawn thread
+                            std::thread::spawn(move || {
+                                new_actor.run();
+                            });
+
+                            locals[*result] = Value::ActorRef(id);
+                        } else {
+                            println!("Runtime Error: Unknown actor type {}", actor_type);
                             locals[*result] = Value::ConstInt(0);
                         }
                     }
@@ -738,7 +840,16 @@ impl Actor {
             Value::List(list) => Value::List(list.clone()),
             Value::Map(map) => Value::Map(map.clone()),
             Value::Set(s) => Value::Set(s.clone()),
-            Value::Entry(k, v) => Value::Entry(k.clone(), v.clone()),
+            Value::Message { type_name, fields } => Value::Message {
+                type_name: type_name.clone(),
+                fields: fields.clone(),
+            },
+            Value::ActorRef(id) => Value::ActorRef(id.clone()),
+            Value::Entry(k, v) => {
+                let resolved_k = self.resolve_value(k, locals);
+                let resolved_v = self.resolve_value(v, locals);
+                Value::Entry(Box::new(resolved_k), Box::new(resolved_v))
+            }
         }
     }
 
@@ -808,15 +919,13 @@ impl Actor {
                             locals[*result] = Value::Map(HashMap::new());
                         } else if func == "MutableSet.new" {
                             locals[*result] = Value::Set(HashSet::new());
+                        } else if let Some(handler) = self.handlers.get(func).cloned() {
+                            let return_val = self.execute_function(&handler, arg_vals);
+                            locals[*result] = return_val;
                         } else {
-                            if let Some(handler) = self.handlers.get(func).cloned() {
-                                let return_val = self.execute_function(&handler, arg_vals);
-                                locals[*result] = return_val;
-                            } else {
-                                // Function not found
-                                eprintln!("Runtime Error: Function '{}' not found", func);
-                                locals[*result] = Value::ConstInt(0);
-                            }
+                            // Function not found
+                            eprintln!("Runtime Error: Function '{}' not found", func);
+                            locals[*result] = Value::ConstInt(0);
                         }
                     }
                     Instruction::SwLoad {

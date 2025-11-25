@@ -34,7 +34,7 @@ fn main() {
         Ok(program) => {
             // println!("{:#?}", program);
             match sema::analyze(&program) {
-                Ok(_) => {
+                Ok(symbols) => {
                     // println!("Semantic analysis passed");
                     use ast::{ActorMember, Definition};
                     use codegen::Codegen;
@@ -54,13 +54,16 @@ fn main() {
                             let mut handlers = Vec::new();
                             for member in &actor_def.members {
                                 if let ActorMember::Method(func) = member {
-                                    let codegen = Codegen::new(actor_def.name.clone());
+                                    let codegen = Codegen::new(actor_def.name.clone(), &symbols);
                                     let handler = codegen.generate(func, &fields);
                                     handlers.push(handler);
                                 }
                             }
+                            let field_names: Vec<String> =
+                                fields.iter().map(|f| f.name.clone()).collect();
                             ir_program.actors.push(IrActor {
                                 name: actor_def.name.clone(),
+                                fields: field_names,
                                 handlers,
                             });
                         }

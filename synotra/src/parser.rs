@@ -2,6 +2,13 @@ use crate::ast::*;
 use crate::lexer::Token;
 use chumsky::prelude::*;
 
+#[derive(Clone, Debug)]
+enum CallSuffix {
+    Method(String, Option<Vec<Expr>>), // .name(args) or .name
+    Call(Vec<Expr>),                   // (args)
+    Index(Expr),                       // [index]
+}
+
 // Helper function to parse expressions from token sequence (for string interpolation)
 fn parse_expr_from_tokens(tokens: &[Token]) -> Result<Expr, String> {
     if tokens.is_empty() {
@@ -86,9 +93,9 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                 *pos += 1; // Skip '.'
                 if *pos < tokens.len() {
                     if let Token::Ident(method_name) = &tokens[*pos] {
-                        *pos += 1; // Skip method name
+                        *pos += 1; // Skip method/field name
 
-                        // Check for arguments
+                        // Check for arguments (method call)
                         if *pos < tokens.len() && tokens[*pos] == Token::LParen {
                             *pos += 1; // Skip '('
                             let mut args = Vec::new();
@@ -110,10 +117,11 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                                 return Err("Expected ')'".to_string());
                             }
                         } else {
-                            return Err("Expected '(' after method name".to_string());
+                            // Field access (no parentheses)
+                            expr = Expr::FieldAccess(Box::new(expr), method_name.clone());
                         }
                     } else {
-                        return Err("Expected method name after '.'".to_string());
+                        return Err("Expected field or method name after '.'".to_string());
                     }
                 } else {
                     return Err("Unexpected end after '.'".to_string());
@@ -143,6 +151,48 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
         Token::Ident(name) => {
             let name = name.clone();
             *pos += 1;
+
+            // Check for spawn(ActorType, args)
+            if name == "spawn" && *pos < tokens.len() && tokens[*pos] == Token::LParen {
+                *pos += 1; // Skip '('
+
+                // Parse actor type (first argument)
+                if *pos < tokens.len() {
+                    if let Token::Ident(actor_type) = &tokens[*pos] {
+                        let actor_type = actor_type.clone();
+                        *pos += 1;
+
+                        // Parse arguments
+                        let mut args = Vec::new();
+                        if *pos < tokens.len() && tokens[*pos] == Token::Comma {
+                            *pos += 1; // Skip comma after actor type
+
+                            // Parse argument list
+                            loop {
+                                args.push(parse_comparison(tokens, pos)?);
+
+                                if *pos < tokens.len() && tokens[*pos] == Token::Comma {
+                                    *pos += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                        if *pos < tokens.len() && tokens[*pos] == Token::RParen {
+                            *pos += 1; // Skip ')'
+                            return Ok(Expr::Spawn { actor_type, args });
+                        } else {
+                            return Err("Expected ')' in spawn expression".to_string());
+                        }
+                    } else {
+                        return Err("Expected actor type after spawn(".to_string());
+                    }
+                } else {
+                    return Err("Unexpected end in spawn expression".to_string());
+                }
+            }
+
             Ok(Expr::Variable(name))
         }
         Token::LParen => {
@@ -199,28 +249,12 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     });
 
     let expr = recursive(|expr| {
-        let ask_expr = just(Token::Ask)
-            .ignore_then(
-                ident
-                    .clone() // Actor name (identifier)
-                    .then_ignore(just(Token::Comma))
-                    .then(ident.clone()) // Handler name (identifier)
-                    .then(
-                        just(Token::Comma)
-                            .ignore_then(expr.clone().separated_by(just(Token::Comma)))
-                            .or_not()
-                            .map(|args| args.unwrap_or_default()),
-                    )
-                    .delimited_by(just(Token::LParen), just(Token::RParen)),
-            )
-            .map(|((target, message), args)| Expr::Ask {
-                target,
-                message,
-                args,
-            });
+        /* Old ask syntax removed
+        let ask_expr = just(Token::Ask) ...
+        */
 
         let atom = choice((
-            ask_expr,
+            // ask_expr, // Removed
             int_lit.map(Expr::Literal),
             str_lit.map(|s| {
                 use crate::lexer::Token as LexToken;
@@ -296,6 +330,21 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     expr
                 }
             }),
+            // spawn(ActorType, args) special form
+            just(Token::Ident("spawn".to_string()))
+                .ignore_then(
+                    ident
+                        .then(
+                            just(Token::Comma)
+                                .ignore_then(expr.clone().separated_by(just(Token::Comma)))
+                                .or_not(),
+                        )
+                        .delimited_by(just(Token::LParen), just(Token::RParen)),
+                )
+                .map(|(actor_type, args)| Expr::Spawn {
+                    actor_type,
+                    args: args.unwrap_or_default(),
+                }),
             ident.map(Expr::Variable),
             expr.clone()
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
@@ -305,7 +354,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .clone()
             .then(
                 choice((
-                    // Method call: .method(args)
+                    // Method call or field access: .ident(args) or .ident
                     just(Token::Dot)
                         .ignore_then(ident)
                         .then(
@@ -314,77 +363,58 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                                 .delimited_by(just(Token::LParen), just(Token::RParen))
                                 .or_not(),
                         )
-                        .map(|(method, args)| (Some(method), args, false)), // (method, args, is_index)
+                        .map(|(method, args)| CallSuffix::Method(method, args)),
                     // Function call: (args)
                     expr.clone()
                         .separated_by(just(Token::Comma))
                         .delimited_by(just(Token::LParen), just(Token::RParen))
-                        .map(|args| (Some("invoke".to_string()), Some(args), false)), // Treat as invoke or handle in map
+                        .map(CallSuffix::Call),
                     // Index access: [index]
                     expr.clone()
                         .delimited_by(just(Token::LBracket), just(Token::RBracket))
-                        .map(|index| (None, Some(vec![index]), true)), // (None, [index], is_index)
+                        .map(CallSuffix::Index),
                 ))
-                .or_not(),
+                .repeated(),
             )
-            .map(|(target, call_suffix)| {
-                if let Some((method, args, is_index)) = call_suffix {
-                    if is_index {
-                        // Index access: target[index]
-                        let index = args.unwrap().into_iter().next().unwrap();
-                        Expr::Index(Box::new(target), Box::new(index))
-                    } else if let Some(args) = args {
-                        // Method or Function call
-                        if let Some(m) = method {
-                            if m == "invoke" {
-                                // Function call: target(args)
-                                // If target is a variable, it's a function call.
-                                // If target is an expression, it's an invoke?
-                                // For println(args), target is Variable("println").
-                                // We want Expr::Call(Variable("self"), "println", args) ??
-                                // No, Expr::Call structure is (target, method, args).
-                                // If I have `println(...)`, it's a global function or method on self.
-                                // In original parser:
-                                // if let Expr::Variable(name) = target {
-                                //      Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
-                                // }
-
-                                if let Expr::Variable(name) = target {
-                                    // Check if it's a known global or just treat as method on self/global
-                                    // For now, map to Call(self, name, args) is what original did?
-                                    // Wait, original did:
-                                    // if let Some(m) = method { Call(target, m, args) }
-                                    // else { if Variable(name) = target { Call(self, name, args) } else { Call(target, "invoke", args) } }
-
-                                    // Here m is "invoke" (my placeholder).
-                                    // So I should check if I really have a method name from Dot.
-                                    // But I merged them.
-
-                                    // Let's distinguish Dot call from Paren call.
-                                    // I can use an enum in map instead of tuple.
-
-                                    Expr::Call(
-                                        Box::new(Expr::Variable("self".to_string())),
-                                        name,
-                                        args,
-                                    )
-                                } else {
-                                    Expr::Call(Box::new(target), "invoke".to_string(), args)
+            .foldl(|target, suffix| match suffix {
+                CallSuffix::Index(index) => Expr::Index(Box::new(target), Box::new(index)),
+                CallSuffix::Call(args) => match target {
+                    Expr::Variable(name) => {
+                        if let Some(first_char) = name.chars().next() {
+                            if first_char.is_uppercase() {
+                                // Uppercase: treat as message constructor
+                                Expr::Construct {
+                                    name: name.clone(),
+                                    args,
+                                    field_names: vec![], // Parser doesn't have field names, sema will fill this
                                 }
                             } else {
-                                // Method call: target.method(args)
-                                Expr::Call(Box::new(target), m, args)
+                                Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
                             }
                         } else {
-                            // Should not happen
-                            target
+                            Expr::Call(Box::new(Expr::Variable(name)), "invoke".to_string(), args)
+                        }
+                    }
+                    _ => Expr::Call(Box::new(target), "invoke".to_string(), args),
+                },
+                CallSuffix::Method(m, args) => {
+                    if let Some(args) = args {
+                        if m == "send" && args.len() == 1 {
+                            Expr::Send {
+                                target: Box::new(target),
+                                message: Box::new(args.into_iter().next().unwrap()),
+                            }
+                        } else if m == "ask" && args.len() == 1 {
+                            Expr::Ask {
+                                target: Box::new(target),
+                                message: Box::new(args.into_iter().next().unwrap()),
+                            }
+                        } else {
+                            Expr::Call(Box::new(target), m, args)
                         }
                     } else {
-                        // Property access (field) - not handled yet
-                        target
+                        Expr::FieldAccess(Box::new(target), m)
                     }
-                } else {
-                    target
                 }
             });
 
@@ -412,8 +442,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             )
             .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
 
-        let compare = sum
-            .clone()
+        sum.clone()
             .then(
                 choice((
                     op(Token::EqEq).to(BinaryOp::Eq),
@@ -426,9 +455,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 .then(sum.clone())
                 .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
-
-        compare
+            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)))
     });
 
     let stmt = recursive(|stmt| {
@@ -456,6 +483,8 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .ignore_then(expr.clone().or_not())
             .map(Stmt::Return);
 
+        // Old send syntax removed. Send is now an expression.
+        /*
         let send_stmt = just(Token::Send)
             .ignore_then(
                 ident
@@ -475,6 +504,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 message,
                 args,
             });
+        */
 
         let if_stmt = just(Token::If)
             .ignore_then(
@@ -534,19 +564,18 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 Stmt::AssignIndex(name, Box::new(index), Box::new(value))
             });
 
-        let expr_stmt = expr.clone().map(Stmt::Expr);
-
-        let_stmt
-            .or(var_stmt)
-            .or(return_stmt)
-            .or(send_stmt)
-            .or(if_stmt)
-            .or(while_stmt)
-            .or(for_stmt)
-            .or(assign_index_stmt) // Check index assignment before simple assignment if ambiguous, but here they start different
-            .or(assign_stmt)
-            .or(expr_stmt)
-            .then_ignore(just(Token::Dot).or_not()) // Optional semicolon/dot? Synotra doesn't specify, assuming optional or none
+        choice((
+            let_stmt,
+            var_stmt,
+            return_stmt,
+            if_stmt,
+            while_stmt,
+            for_stmt,
+            assign_index_stmt, // Try index assignment before variable assignment
+            assign_stmt,
+            expr.clone().map(Stmt::Expr),
+        ))
+        // .then_ignore(just(Token::Semicolon).or_not()) // No semicolon token
     });
 
     let param = ident

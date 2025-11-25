@@ -1,0 +1,14 @@
+// Test message constructor syntax
+
+data message CalcFib(val n: Int)
+data message Result(val value: Int, val msg: String)
+
+actor main(name: String) {
+    io fun run() {
+        // Message construction
+        var msg1 = CalcFib(35)
+        var msg2 = Result(100, "success")
+        
+        println("Message construction test")
+    }
+}

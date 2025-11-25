@@ -8,6 +8,7 @@ pub struct IrProgram {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrActor {
     pub name: String,
+    pub fields: Vec<String>,
     pub handlers: Vec<IrHandler>,
 }
 
@@ -51,17 +52,6 @@ pub enum Instruction {
         method: String,
         args: Vec<Value>,
     },
-    Send {
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
-    Ask {
-        result: usize, // Local index
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
     SwLoad {
         result: usize,
         collection: usize, // Local index of collection
@@ -71,6 +61,30 @@ pub enum Instruction {
         collection: usize, // Local index of collection
         index: usize,      // Local index of key/index
         value: usize,      // Local index of value
+    },
+    CreateMessage {
+        result: usize,
+        type_name: String,
+        field_values: Vec<(String, Value)>, // (field_name, value) pairs
+    },
+    GetField {
+        result: usize,
+        target: Value,
+        field_name: String,
+    },
+    Spawn {
+        result: usize,
+        actor_type: String,
+        args: Vec<Value>,
+    },
+    Send {
+        target: Value,
+        message: Value,
+    },
+    Ask {
+        result: usize,
+        target: Value,
+        message: Value,
     },
     Exit,
 }
@@ -143,6 +157,13 @@ pub enum Value {
     List(Vec<Value>),
     Map(HashMap<Value, Value>),
     Set(HashSet<Value>),
+
+    // Structured Messages
+    Message {
+        type_name: String,
+        fields: HashMap<String, Box<Value>>,
+    },
+    ActorRef(String),              // Actor ID
     Entry(Box<Value>, Box<Value>), // Key, Value
 }
 
@@ -173,14 +194,22 @@ impl Hash for Value {
                 5u8.hash(state);
                 l.hash(state);
             }
+            Value::Message { type_name, .. } => {
+                6u8.hash(state);
+                type_name.hash(state);
+            }
             Value::Map(_) => {
                 panic!("Cannot hash Map");
             }
             Value::Set(_) => {
                 panic!("Cannot hash Set");
             }
+            Value::ActorRef(id) => {
+                7u8.hash(state);
+                id.hash(state);
+            }
             Value::Entry(k, v) => {
-                6u8.hash(state);
+                8u8.hash(state);
                 k.hash(state);
                 v.hash(state);
             }

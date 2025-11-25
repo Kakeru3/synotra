@@ -1,0 +1,33 @@
+// Test method call syntax for send/ask
+
+data message Ping(val id: Int)
+data message Pong(val id: Int)
+
+actor Worker(name: String) {
+    io fun handle(msg: Ping) {
+        println("Worker received Ping")
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        // Create worker (mock, since we don't have spawn yet, assume we have a ref)
+        // Actually we can't create a ref easily without spawn.
+        // But we can define a function that takes a ref.
+        
+        println("Method call test")
+    }
+    
+    io fun test_send(worker: ActorRef<Ping>) {
+        var msg = Ping(1)
+        worker.send(msg)
+        worker.send(Ping(2))
+        
+        // worker.send(Pong(1)) // Should fail type check
+    }
+    
+    io fun test_ask(worker: ActorRef<Ping>) {
+        var res = worker.ask(Ping(3))
+        // worker.ask(Pong(1)) // Should fail type check
+    }
+}

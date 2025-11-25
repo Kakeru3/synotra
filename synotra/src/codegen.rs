@@ -3,24 +3,27 @@ use crate::ast::*;
 use crate::ir::Instruction;
 use crate::ir::Terminator;
 use crate::ir::*;
+use crate::sema::{Symbol, SymbolTable};
 use std::collections::HashMap;
 
-pub struct Codegen {
+pub struct Codegen<'a> {
     blocks: Vec<BasicBlock>,
     current_block_idx: usize,
     locals_map: HashMap<String, usize>,
     next_local_id: usize,
     current_actor: String,
+    symbols: &'a SymbolTable,
 }
 
-impl Codegen {
-    pub fn new(actor_name: String) -> Self {
+impl<'a> Codegen<'a> {
+    pub fn new(actor_name: String, symbols: &'a SymbolTable) -> Self {
         Codegen {
             blocks: Vec::new(),
             current_block_idx: 0,
             locals_map: HashMap::new(),
             next_local_id: 0,
             current_actor: actor_name,
+            symbols,
         }
     }
 
@@ -177,23 +180,8 @@ impl Codegen {
                     None
                 };
                 self.current_block_mut().terminator = Terminator::Return(val);
-                // Unreachable code after return, but we need to keep pushing to a valid block
-                // Create a dead block to catch subsequent instructions
-                self.new_block();
             }
-            Stmt::Send {
-                target,
-                message,
-                args,
-            } => {
-                // target and message are now String identifiers
-                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
-                self.current_block_mut().instrs.push(Instruction::Send {
-                    target: Value::ConstString(target.clone()),
-                    msg: Value::ConstString(message.clone()),
-                    args: arg_vals,
-                });
-            }
+            // Stmt::Send removed from AST
             Stmt::If(cond, then_block, else_block) => {
                 let cond_val = self.gen_expr(cond);
 
@@ -543,23 +531,94 @@ impl Codegen {
 
                 Value::Local(res)
             }
-            Expr::Ask {
-                target,
-                message,
-                args,
-            } => {
-                // target and message are now String identifiers
-                let arg_vals = args.iter().map(|arg| self.gen_expr(arg)).collect();
-                let res = self.alloc_temp();
+            Expr::Ask { target, message } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+                let result_idx = self.alloc_temp();
 
                 self.current_block_mut().instrs.push(Instruction::Ask {
-                    result: res,
-                    target: Value::ConstString(target.clone()),
-                    msg: Value::ConstString(message.clone()),
-                    args: arg_vals,
+                    result: result_idx,
+                    target: target_val,
+                    message: msg_val,
                 });
 
-                Value::Local(res)
+                Value::Local(result_idx)
+            }
+            Expr::Spawn { actor_type, args } => {
+                // Generate argument values
+                let arg_values: Vec<Value> = args.iter().map(|arg| self.gen_expr(arg)).collect();
+
+                // Allocate local for the result ActorRef
+                let result_idx = self.get_or_alloc_local(&format!("_ref_{}", actor_type));
+
+                // Emit Spawn instruction
+                self.current_block_mut().instrs.push(Instruction::Spawn {
+                    result: result_idx,
+                    actor_type: actor_type.clone(),
+                    args: arg_values,
+                });
+
+                Value::Local(result_idx)
+            }
+            Expr::Send { target, message } => {
+                let target_val = self.gen_expr(target);
+                let msg_val = self.gen_expr(message);
+
+                self.current_block_mut().instrs.push(Instruction::Send {
+                    target: target_val,
+                    message: msg_val,
+                });
+
+                Value::ConstInt(0)
+            }
+            Expr::FieldAccess(target, field_name) => {
+                let target_val = self.gen_expr(target);
+                let result_idx = self.get_or_alloc_local(&format!("_field_{}", field_name));
+
+                self.current_block_mut().instrs.push(Instruction::GetField {
+                    result: result_idx,
+                    target: target_val,
+                    field_name: field_name.clone(),
+                });
+
+                Value::Local(result_idx)
+            }
+            Expr::Construct {
+                name,
+                args,
+                field_names: _,
+            } => {
+                // Get field names from symbol table
+                let field_names =
+                    if let Some(Symbol::DataMessage(fields)) = self.symbols.lookup(name) {
+                        fields
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>()
+                    } else {
+                        // Fallback: use field_0, field_1, etc. if not found
+                        (0..args.len()).map(|i| format!("field_{}", i)).collect()
+                    };
+
+                // Generate (field_name, value) pairs
+                let mut field_pairs = Vec::new();
+                for (field_name, arg) in field_names.iter().zip(args.iter()) {
+                    field_pairs.push((field_name.clone(), self.gen_expr(arg)));
+                }
+
+                // Allocate local for the result
+                let result_idx = self.get_or_alloc_local(&format!("_msg_{}", name));
+
+                // Emit CreateMessage instruction with field pairs
+                self.current_block_mut()
+                    .instrs
+                    .push(Instruction::CreateMessage {
+                        result: result_idx,
+                        type_name: name.clone(),
+                        field_values: field_pairs, // (field_name, value) pairs
+                    });
+
+                Value::Local(result_idx)
             }
         }
     }

@@ -1,0 +1,20 @@
+// Test send and ask instructions
+data message Greeting(val text: String)
+
+actor Worker(name: String) {
+    io fun receive(msg: Greeting) {
+        println("Worker ${name} received greeting: ${msg.text}")
+    }
+}
+
+actor main(name: String) {
+    io fun run() {
+        println("Testing send/ask...")
+        var worker = spawn(Worker, "worker1")
+        
+        // Use ask to wait for processing
+        worker.ask(Greeting("Hello from main"))
+        
+        println("Message processed")
+    }
+}

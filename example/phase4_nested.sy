@@ -1,0 +1,15 @@
+// Phase 4: Nested Messages and Field Access Test
+
+data message User(val id: Int, val name: String)
+data message UpdateProfile(val user: User, val active: Int)
+
+actor main(name: String) {
+    io fun run() {
+        println("Phase 4: Nested messages test")
+        
+        var user = User(42, "Alice")
+        var update = UpdateProfile(user, 1)
+        
+        println("Test complete!")
+    }
+}

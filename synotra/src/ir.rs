@@ -10,6 +10,7 @@ pub struct IrProgram {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrActor {
     pub name: String,
+    pub fields: Vec<String>,
     pub handlers: Vec<IrHandler>,
 }
 
@@ -53,17 +54,6 @@ pub enum Instruction {
         method: String,
         args: Vec<Value>,
     },
-    Send {
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
-    Ask {
-        result: usize, // Local index
-        target: Value,
-        msg: Value,
-        args: Vec<Value>,
-    },
     SwLoad {
         result: usize,
         collection: usize,
@@ -73,6 +63,30 @@ pub enum Instruction {
         collection: usize,
         index: usize,
         value: usize,
+    },
+    CreateMessage {
+        result: usize,
+        type_name: String,
+        field_values: Vec<(String, Value)>, // (field_name, value) pairs
+    },
+    GetField {
+        result: usize,
+        target: Value,
+        field_name: String,
+    },
+    Spawn {
+        result: usize,
+        actor_type: String,
+        args: Vec<Value>,
+    },
+    Send {
+        target: Value,
+        message: Value,
+    },
+    Ask {
+        result: usize,
+        target: Value,
+        message: Value,
     },
     Exit,
 }
@@ -95,6 +109,13 @@ pub enum Value {
     List(Vec<Value>),
     Map(HashMap<Value, Value>),
     Set(HashSet<Value>),
+
+    // Structured Messages
+    Message {
+        type_name: String,
+        fields: HashMap<String, Box<Value>>,
+    },
+    ActorRef(String), // Actor ID (UUID or instance ID)
 }
 
 impl Hash for Value {
@@ -119,6 +140,14 @@ impl Hash for Value {
             Value::List(l) => {
                 5u8.hash(state);
                 l.hash(state);
+            }
+            Value::Message { type_name, .. } => {
+                8u8.hash(state);
+                type_name.hash(state); // Only hash type_name to avoid deep recursion
+            }
+            Value::ActorRef(id) => {
+                9u8.hash(state);
+                id.hash(state);
             }
             Value::Map(_) => {
                 panic!("Cannot hash Map");
