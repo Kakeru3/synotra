@@ -215,7 +215,8 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     let str_lit = select! { Token::String(s) => s };
 
     let type_parser = recursive(|type_parser| {
-        ident
+        // Handle Unit token separately (no type parameters)
+        just(Token::Unit).to(Type::Unit).or(ident
             .then(
                 type_parser
                     .separated_by(just(Token::Comma))
@@ -245,7 +246,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                         Type::UserDefined(name)
                     }
                 }
-            })
+            }))
     });
 
     let expr = recursive(|expr| {

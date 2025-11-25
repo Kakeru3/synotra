@@ -1,4 +1,4 @@
-// String Interpolation and Variables
+// Variables and String Interpolation
 
 actor main(name: String) {
     io fun run() {
@@ -8,7 +8,7 @@ actor main(name: String) {
         
         var x = 10
         var y = 20
-        var sum = x + y
-        println("The sum of ${x} and ${y} is ${sum}")
+        println("x = ${x}, y = ${y}")
+        println("Sum: ${x + y}")
     }
 }

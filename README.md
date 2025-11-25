@@ -26,6 +26,7 @@ cd synotra
 cargo build --release
 ```
 
+
 ### Running Programs
 
 Use the `run.sh` script for quick development:
@@ -158,7 +159,30 @@ actor main(name: String) {
 
 - **Conditionals**: `if`/`else`
 - **Loops**: `while`, `for (i in start..end)`
-- **Functions**: Pure functions and IO functions
+
+### Functions
+
+Pure functions are defined with `fun`. If they return a value, the return type is **mandatory**.
+
+```scala
+// Pure function with return value
+fun add(a: Int, b: Int): Int {
+    return a + b
+}
+
+// Pure function without return value (return type omitted)
+fun log(msg: String) {
+    // ...
+}
+```
+
+IO functions are defined with `io fun`. They perform side effects and **do not have a return type**.
+
+```scala
+io fun printMessage(msg: String) {
+    println(msg)
+}
+```
 
 ### Operators
 

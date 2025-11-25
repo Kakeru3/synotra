@@ -1,4 +1,4 @@
-// Hello World - The simplest Synotra program
+// Hello World - A simple Synotra program
 
 actor main(name: String) {
     io fun run() {

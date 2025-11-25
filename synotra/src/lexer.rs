@@ -47,6 +47,8 @@ pub enum Token {
     While,
     #[token("in")]
     In,
+    #[token("Unit")]
+    Unit,
 
     // Symbols
     #[token("(")]

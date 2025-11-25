@@ -86,6 +86,7 @@ pub enum Type {
     Int,
     String,
     Bool,
+    Unit, // For IO functions - no actual value
     UserDefined(String),
     Generic(String, Vec<Type>), // e.g., List<Int>
     ActorRef(Box<Type>),        // e.g., ActorRef<CalcFib>

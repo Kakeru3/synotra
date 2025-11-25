@@ -237,6 +237,15 @@ fn analyze_function(func: &FunctionDef, symbols: &mut SymbolTable) -> Result<(),
         return Err(format!("IO function '{}' cannot have a return type. IO functions should only perform side effects.", func.name));
     }
 
+    // Check: Pure functions must have a return type if they return a value
+    // (We can't easily check if the body returns a value without full flow analysis,
+    // but we can enforce that if a return type is present, it's not Unit)
+    if !func.is_io {
+        if let Some(Type::Unit) = func.return_type {
+            return Err(format!("Pure function '{}' cannot explicitly return Unit. If it returns nothing, omit the return type.", func.name));
+        }
+    }
+
     symbols.enter_scope();
 
     for param in &func.params {
