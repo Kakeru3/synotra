@@ -1,9 +1,0 @@
-// Test data message syntax
-data message CalcFib(val n: Int)
-data message FibResult(val value: Int)
-
-actor main(name: String) {
-    io fun run() {
-        println("Data message syntax test")
-    }
-}

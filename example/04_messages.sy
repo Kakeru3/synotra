@@ -1,0 +1,21 @@
+// Data Messages and Field Access
+
+data message User(val id: Int, val name: String)
+data message Task(val id: Int, val description: String, val assignee: User)
+
+actor main(name: String) {
+    io fun run() {
+        // Create a message
+        var user = User(1, "Alice")
+        println("User: ${user.name} (ID: ${user.id})")
+        
+        // Nested message
+        var task = Task(101, "Review code", user)
+        println("Task ${task.id}: ${task.description}")
+        println("Assigned to: ${task.assignee.name}")
+        
+        // Direct nesting
+        var task2 = Task(102, "Write docs", User(2, "Bob"))
+        println("Task ${task2.id} assigned to ${task2.assignee.name}")
+    }
+}

@@ -1,0 +1,7 @@
+// Hello World - The simplest Synotra program
+
+actor main(name: String) {
+    io fun run() {
+        println("Hello, World!")
+    }
+}

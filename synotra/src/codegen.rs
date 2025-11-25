@@ -461,7 +461,37 @@ impl<'a> Codegen<'a> {
                     }
                 }
 
-                // Check if this is a collection method
+                // Check if IO functions first (print, println, exit)
+                let func_name = method.clone();
+                if func_name == "print" || func_name == "println" {
+                    let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
+                    let res = self.alloc_temp();
+                    self.current_block_mut().instrs.push(Instruction::CallIo {
+                        result: res,
+                        func: func_name,
+                        args: arg_vals,
+                    });
+                    return Value::Local(res);
+                } else if func_name == "exit" {
+                    self.current_block_mut().instrs.push(Instruction::Exit);
+                    return Value::ConstInt(0);
+                }
+
+                // Check if this is a local function call (target is a variable, not an object)
+                if let Expr::Variable(_func_name) = &**target {
+                    // This is a pure function call like add(5, 3)
+                    let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
+                    let res = self.alloc_temp();
+
+                    self.current_block_mut().instrs.push(Instruction::CallPure {
+                        result: res,
+                        func: method.clone(),
+                        args: arg_vals,
+                    });
+                    return Value::Local(res);
+                }
+
+                // Check if this is a collection method (comes after local function check)
                 let collection_methods = [
                     "add",
                     "get",
@@ -507,27 +537,16 @@ impl<'a> Codegen<'a> {
                 }
 
                 // Generate target value (for instance methods)
-                let _ = self.gen_expr(target); // Evaluate target for side effects if any, but we don't use it for pure calls
+                let _ = self.gen_expr(target); // Evaluate target for side effects if any
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let res = self.alloc_temp();
 
-                // Check if IO or Pure (simplified)
-                let func_name = method.clone();
-                if func_name == "print" || func_name == "println" {
-                    self.current_block_mut().instrs.push(Instruction::CallIo {
-                        result: res,
-                        func: func_name,
-                        args: arg_vals,
-                    });
-                } else if func_name == "exit" {
-                    self.current_block_mut().instrs.push(Instruction::Exit);
-                } else {
-                    self.current_block_mut().instrs.push(Instruction::CallPure {
-                        result: res,
-                        func: func_name,
-                        args: arg_vals,
-                    });
-                }
+                // Default to CallPure
+                self.current_block_mut().instrs.push(Instruction::CallPure {
+                    result: res,
+                    func: method.clone(),
+                    args: arg_vals,
+                });
 
                 Value::Local(res)
             }

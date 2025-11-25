@@ -1,16 +1,17 @@
 # Synotra
 
-**Synotra** is a concurrent, actor-model based programming language with built-in support for distributed systems and strong consistency guarantees.
+**Synotra** is a concurrent, actor-based programming language with built-in support for message passing and strong type safety.
 
 ## Features
 
 ✨ **Actor-Based Concurrency** - Lightweight actors with message passing  
 ⚡ **True Multi-Core Parallelism** - Harness multiple CPU cores efficiently  
-🔒 **Single Writer Semantics** - Strong consistency guarantees for collections  
-🎯 **IO Safety** - Explicit `io` keyword for side-effecting operations  
-📦 **Rich Collections** - List, Map, Set with full type inference  
-🔄 **For-Each Loops** - Iterate over collections easily  
-🚀 **High Performance** - Optimized runtime with Tokio async/await
+� **Single Writer Principle** - Each actor owns and modifies only its own state  
+�📦 **Data Messages** - Type-safe message definitions with field access  
+🎯 **Dynamic Actor Spawning** - Create actors at runtime  
+💬 **Send & Ask** - Fire-and-forget and request-response messaging  
+🛡️ **IO Safety** - Explicit `io` keyword for side-effecting operations  
+🚀 **High Performance** - Optimized runtime with multi-threading
 
 ## Quick Start
 
@@ -27,172 +28,165 @@ cargo build --release
 
 ### Running Programs
 
-Use the `run.sh` script for quick development (compiles and runs in one command):
+Use the `run.sh` script for quick development:
 
 ```bash
 # Run a .sy file directly
-./run.sh example/hello_world.sy
-```
-
-Or compile and run manually:
-
-```bash
-# 1. Compile .sy to .syi
-./target/release/synotra example/your_program.sy > example/your_program.syi
-
-# 2. Run with the VM
-cd syvm
-cargo run --release -- ../example/your_program.syi
+./run.sh example/01_hello_world.sy
 ```
 
 ## Language Syntax
 
-Synotra uses Kotlin-like syntax with explicit actor definitions:
-
 ### Hello World
 
-```kotlin
-// Simple "Hello World" actor
+```synotra
 actor main(name: String) {
-    var str = ", World!"
     io fun run() {
-        println("Hello${str}")
+        println("Hello, World!")
     }
 }
 ```
 
-### Collections and For-Each Loops
+### Variables and String Interpolation
 
-```kotlin
-actor main(env: Env) {
+```synotra
+actor main(name: String) {
     io fun run() {
-        // Create and iterate over a List
-        var list = List.new()
-        list.add(10)
-        list.add(20)
-        list.add(30)
+        var greeting = "Hello"
+        var target = "World"
+        println("${greeting}, ${target}!")
+        
+        var x = 10
+        var y = 20
+        println("Sum: ${x + y}")
+    }
+}
+```
 
-        for (item in list) {
-            println("Item: ${item}")
+### Control Flow
+
+```synotra
+actor main(name: String) {
+    io fun run() {
+        // If-else
+        var x = 10
+        if (x > 5) {
+            println("x is greater than 5")
+        } else {
+            println("x is less than or equal to 5")
         }
-
-        // Create and iterate over a Map
-        var map = MutableMap.new()
-        map.put("a", 1)
-        map.put("b", 2)
-
-        for (key in map.keys()) {
-            println("Key: ${key}")
+        
+        // While loop
+        var counter = 0
+        while (counter < 3) {
+            println("Counter: ${counter}")
+            counter = counter + 1
         }
-
-        for (entry in map.entrySet()) {
-            println("${entry.key()}: ${entry.value()}")
+        
+        // For loop
+        for (i in 0..5) {
+            println("For loop: ${i}")
         }
     }
 }
 ```
 
-### Actor Communication
+### Data Messages
 
-```kotlin
-class Start()
+```synotra
+data message User(val id: Int, val name: String)
+data message Task(val id: Int, val description: String, val assignee: User)
 
 actor main(name: String) {
-    io fun run(msg: Start) {
-        // Ask another actor to perform computation
-        var result = ask(Worker1, calc_fib, 35)
-        println("Result: ${result}")
-    }
-}
-
-actor Worker1(name: String) {
-    io fun calc_fib(n: Int) {
-        var a = 0
-        var b = 1
-        var i = 0
-        while (i < n) {
-            var temp = a + b
-            a = b
-            b = temp
-            i = i + 1
-        }
-        return a
+    io fun run() {
+        // Create messages
+        var user = User(1, "Alice")
+        println("User: ${user.name} (ID: ${user.id})")
+        
+        // Nested messages
+        var task = Task(101, "Review code", user)
+        println("Task: ${task.description}")
+        println("Assigned to: ${task.assignee.name}")
+        
+        // Direct nesting
+        var task2 = Task(102, "Write docs", User(2, "Bob"))
+        println("Task assigned to ${task2.assignee.name}")
     }
 }
 ```
 
-### Supported Features
+### Actor Spawning and Message Passing
 
-#### Data Types
+```synotra
+data message Task(val id: Int, val description: String)
 
-- **Primitives**: `Int`, `String`, `Bool`
-- **Collections**: `List<T>`, `MutableMap<K,V>`, `MutableSet<T>`
-- **User-Defined**: Message classes, actors
+// Worker actor processes tasks
+actor Worker(workerId: Int) {
+    io fun receive(task: Task) {
+        println("Worker ${workerId} processing task ${task.id}: ${task.description}")
+    }
+}
 
-#### Control Flow
+// Main actor spawns workers and sends tasks
+actor main(name: String) {
+    io fun run() {
+        // Spawn workers
+        var worker1 = spawn(Worker, 1)
+        var worker2 = spawn(Worker, 2)
+        
+        // Send messages (fire-and-forget)
+        worker1.send(Task(101, "Process data batch 1"))
+        worker2.send(Task(102, "Process data batch 2"))
+        
+        // Ask (synchronous request-response)
+        worker1.ask(Task(103, "Urgent analysis"))
+        
+        println("All tasks dispatched!")
+    }
+}
+```
+
+## Language Features
+
+### Data Types
+
+- **Primitives**: `Int`, `String`
+- **Messages**: User-defined via `data message`
+- **Actors**: `ActorRef<MessageType>`
+
+### Control Flow
 
 - **Conditionals**: `if`/`else`
-- **Loops**: `while`, `for (i in start..end)`, `for (item in collection)`
+- **Loops**: `while`, `for (i in start..end)`
 - **Functions**: Pure functions and IO functions
 
-#### Operators
+### Operators
 
 - **Arithmetic**: `+`, `-`, `*`, `/`
 - **Comparison**: `==`, `!=`, `<`, `<=`, `>`, `>=`
 - **String Interpolation**: `"Hello ${name}!"`
 
-#### Actor Features
+### Actor Features
 
-- **Message Passing**: `ask(actor, handler, args)` for request/response
+- **Data Messages**: `data message Name(val field: Type, ...)`
+- **Field Access**: `msg.fieldName`, `msg.nested.field`
+- **Spawning**: `var actor = spawn(ActorType, args...)`
+- **Send**: `actor.send(message)` - Fire-and-forget
+- **Ask**: `var result = actor.ask(message)` - Request-response
 - **IO Safety**: Compile-time checks for side-effecting code
-- **Local Functions**: Define helper functions within actors
-- **State**: Actor-level variables (`var`/`val`)
-
-#### Collection Methods
-
-- **List**: `add()`, `get()`, `size()`, `isEmpty()`, `addAll()`, `clear()`
-- **Map**: `put()`, `get()`, `containsKey()`, `keys()`, `values()`, `entrySet()`, `size()`, `clear()`
-- **Set**: `add()`, `remove()`, `contains()`, `size()`, `values()`, `addAll()`, `clear()`
-- **Entry**: `key()`, `value()` (for Map entries)
 
 ## Examples
 
-### Available Examples
+All examples are in the `example/` directory:
 
 ```bash
-# Basic concepts
-./run.sh example/hello_world.sy          # Simple hello world
-./run.sh example/control_flow.sy         # If/else and loops
-./run.sh example/function_simple.sy      # Functions demonstration
-./run.sh example/function_recursive.sy   # Recursive functions
-
-# Collections
-./run.sh example/collection_foreach.sy   # For-each iteration
-./run.sh example/map_entryset.sy        # Map.entrySet() usage
-./run.sh example/set_iteration.sy       # Set iteration
-
-# Actor communication
-./run.sh example/test_async_fib.sy      # Ask pattern with fibonacci
-./run.sh example/fib_parallel_recursive.sy  # Parallel computation
-
-# IO Safety
-./run.sh example/io_safety_test_pass.sy  # ✅ Valid IO usage
-./run.sh example/io_safety_test_fail.sy  # ❌ Compile error demo
+./run.sh example/01_hello_world.sy    # Hello World
+./run.sh example/02_control_flow.sy   # If/else, loops
+./run.sh example/03_variables.sy      # Variables and interpolation
+./run.sh example/04_messages.sy       # Data messages and field access
+./run.sh example/05_actors.sy         # Actor spawning and messaging
+./run.sh example/06_functions.sy      # Pure function definitions
 ```
-
-### Performance: Parallel Fibonacci
-
-Demonstrates true parallel execution across multiple CPU cores:
-
-```bash
-./run.sh example/fib_parallel_recursive.sy
-```
-
-**Features:**
-
-- 6 worker actors computing different Fibonacci numbers in parallel
-- Demonstrates `ask()` pattern for collecting results
-- Shows multi-core performance benefits
 
 ## Project Structure
 
@@ -205,15 +199,15 @@ synotra/
 │   │   ├── ast.rs        # Abstract Syntax Tree
 │   │   ├── sema.rs       # Semantic analyzer (type checking, IO safety)
 │   │   ├── codegen.rs    # IR code generation
-│   │   ├── ir.rs         # Intermediate representation (SSA)
+│   │   ├── ir.rs         # Intermediate representation
 │   │   └── main.rs       # CLI entry point
 │   └── Cargo.toml
 ├── syvm/              # Virtual Machine
 │   ├── src/
 │   │   ├── bytecode.rs   # IR data structures
-│   │   ├── actor.rs      # Actor runtime & mailbox
-│   │   ├── runtime.rs    # Scheduler & execution engine
-│   │   └── main.rs       # CLI entry point (multi-threaded runtime)
+│   │   ├── actor.rs      # Actor runtime & execution
+│   │   ├── runtime.rs    # Scheduler & multi-threading
+│   │ │   └── main.rs       # CLI entry point
 │   └── Cargo.toml
 ├── example/           # Example programs (.sy files)
 ├── run.sh            # Compile and run script
@@ -230,96 +224,57 @@ synotra/
 
 ### Type System
 
-- **Type Inference**: Automatic type inference for variables and collections
-- **Generic Collections**: Full support for `List<T>`, `Map<K,V>`, `Set<T>`
+- **Type Inference**: Automatic type inference for variables
+- **Message Types**: Structural typing for data messages
 - **IO Safety**: Compile-time enforcement of IO context requirements
+
+### Actor Model & Single Writer
+
+- **Isolation**: Each actor has its own private state (fields)
+- **Single Writer**: An actor can only modify its own state, never another actor's
+- **Message Passing**: Actors communicate exclusively through immutable messages
+- **No Shared Memory**: No shared mutable state between actors
+- **Thread Safety**: Each actor runs independently, eliminating data races
 
 ### Multi-Core Runtime
 
-- **Tokio Multi-Threaded Runtime**: Worker threads for concurrent execution
-- **Spawn Blocking**: Actors run on OS threads for true parallelism
-- **Message Passing**: Async channels between actors
-- **Ask/Response**: Future-based request/response pattern
-
-## Development
-
-### Running Tests
-
-```bash
-# Basic functionality
-./run.sh example/hello_world.sy
-./run.sh example/collection_foreach.sy
-
-# Actor communication
-./run.sh example/test_async_fib.sy
-```
-
-### Adding New Features
-
-1. **Lexer**: Add tokens in `lexer.rs`
-2. **Parser**: Extend grammar in `parser.rs`
-3. **AST**: Define new node types in `ast.rs`
-4. **Semantic Analysis**: Add validation in `sema.rs`
-5. **Codegen**: Generate IR in `codegen.rs`
-6. **VM**: Implement execution in `actor.rs`
-
-## Editor Support
-
-### VS Code Extension
-
-A VS Code extension for Synotra is available, providing syntax highlighting and language support:
-
-**[synotra-vscode](https://github.com/synotra-lang/synotra-vscode)**
-
-Features:
-
-- Syntax highlighting for `.sy` files
-- Language server protocol (LSP) support
-- Code snippets and autocompletion
+- **Thread-per-Actor**: Each spawned actor runs on a dedicated OS thread
+- **Message Passing**: MPSC channels between actors
+- **Ask/Response**: Blocking request-response with reply channels
 
 ## Roadmap
 
-### ✅ Completed
+### ✅ Phase 4 Complete
 
-- [x] Actor-based concurrency with message passing
-- [x] `ask()` pattern for request/response (async with futures)
-- [x] Function definitions and calls (local functions)
-- [x] Collections (`List<T>`, `MutableMap<K,V>`, `MutableSet<T>`)
-  - [x] Single Writer (SW) support
-  - [x] Full set of collection methods
-  - [x] Type inference for generic collections
-- [x] For-each loops (`for (item in collection)`)
-- [x] String interpolation with expression support
-- [x] Actor-level field declarations (`var`/`val`)
-- [x] IO safety checks (compile-time enforcement)
-- [x] Control flow (`if`/`else`, `while`, `for..in`)
-- [x] Range-based iteration (`for (i in 0..10)`)
-- [x] Type-safe actor/handler references (no string literals)
+- [x] Data message definitions (`data message`)
+- [x] Message construction and field access
+- [x] Actor spawning (`spawn`)
+- [x] Message passing (`send`, `ask`)
+- [x] Nested message support
+- [x] String interpolation with field access
 
-### 🚧 In Progress
+### 📋 Phase 5 Planned
 
-- [ ] Enhanced error messages
-- [ ] Type inference improvements
+- [ ] Handler return values for `ask`
+- [ ] Type-safe message routing
+- [ ] Direct handler calls (`actor.handlerName(msg)`)
+- [ ] Error handling for dead actors
+- [ ] Async `ask` (non-blocking)
+
+### 🚀 Future
+
+- [ ] CRDT state support
 - [ ] Pattern matching
-
-### 📋 Planned
-
-- [ ] CRDT state support for distributed consistency
-- [ ] Struct/Class definitions beyond message types
-- [ ] Immutable collection variants
+- [ ] Collections (List, Map, Set)
 - [ ] Network distribution (remote actors)
-- [ ] Persistence and snapshots
-- [ ] Debugging tools and REPL
 - [ ] Standard library expansion
 
 ## Performance Tips
 
-For maximum performance:
-
-1. **Use release builds**: Always compile with `cargo build --release`
-2. **Minimize I/O**: Reduce `println()` calls in tight loops
+1. **Use release builds**: `cargo build --release`
+2. **Minimize I/O**: Reduce `println()` in tight loops
 3. **Batch work**: Give each actor substantial computation
-4. **Collections**: Use appropriate collection types for your use case
+4. **Leverage parallelism**: Spawn multiple workers
 
 ## License
 

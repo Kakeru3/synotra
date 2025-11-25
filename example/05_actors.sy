@@ -1,0 +1,31 @@
+// Actor Spawning and Message Passing
+
+data message Task(val id: Int, val description: String)
+
+// Worker actor processes tasks
+actor Worker(workerId: Int) {
+    io fun receive(task: Task) {
+        println("Worker ${workerId} processing task ${task.id}: ${task.description}")
+    }
+}
+
+// Main actor spawns workers and sends tasks
+actor main(name: String) {
+    io fun run() {
+        println("Starting task distribution system")
+        
+        // Spawn workers
+        var worker1 = spawn(Worker, 1)
+        var worker2 = spawn(Worker, 2)
+        
+        // Send tasks (fire-and-forget)
+        worker1.send(Task(101, "Process data batch 1"))
+        worker2.send(Task(102, "Process data batch 2"))
+        worker1.send(Task(103, "Generate report"))
+        
+        // Ask (synchronous request-response)
+        worker2.ask(Task(104, "Urgent analysis"))
+        
+        println("All tasks dispatched!")
+    }
+}

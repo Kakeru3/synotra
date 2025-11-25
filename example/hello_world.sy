@@ -1,7 +1,0 @@
-// Simple "Hello World" actor
-actor main(name: String) {
-    var str = ", World!"
-    io fun run() {
-        println("Hello${str}")
-    }
-}

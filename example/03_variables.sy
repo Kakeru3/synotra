@@ -1,0 +1,14 @@
+// String Interpolation and Variables
+
+actor main(name: String) {
+    io fun run() {
+        var greeting = "Hello"
+        var target = "World"
+        println("${greeting}, ${target}!")
+        
+        var x = 10
+        var y = 20
+        var sum = x + y
+        println("The sum of ${x} and ${y} is ${sum}")
+    }
+}

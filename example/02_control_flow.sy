@@ -1,0 +1,25 @@
+// Basic Control Flow - if, while, for
+
+actor main(name: String) {
+    io fun run() {
+        // If-else
+        var x = 10
+        if (x > 5) {
+            println("x is greater than 5")
+        } else {
+            println("x is less than or equal to 5")
+        }
+        
+        // While loop
+        var counter = 0
+        while (counter < 3) {
+            println("Counter: ${counter}")
+            counter = counter + 1
+        }
+        
+        // For loop
+        for (i in 0..5) {
+            println("For loop: ${i}")
+        }
+    }
+}
