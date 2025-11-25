@@ -1,5 +1,6 @@
 mod ast;
 mod codegen;
+mod error;
 mod ir;
 mod lexer;
 mod parser;
@@ -24,8 +25,16 @@ fn main() {
     let code = fs::read_to_string(&args.input).expect("Failed to read input file");
 
     let lexer = Token::lexer(&code);
-    let tokens: Vec<_> = lexer.filter_map(|t| t.ok()).collect(); // TODO: Handle errors
-                                                                 // println!("Tokens: {:?}", tokens);
+
+    // Collect tokens with their positions (spans)
+    let tokens_with_spans: Vec<(Token, std::ops::Range<usize>)> = lexer
+        .spanned()
+        .filter_map(|(tok, span)| tok.ok().map(|t| (t, span)))
+        .collect();
+
+    // For now, extract just tokens for the parser (Phase 3 will use spans)
+    let tokens: Vec<_> = tokens_with_spans.iter().map(|(t, _)| t.clone()).collect();
+    // println!("Tokens: {:?}", tokens);
 
     let parser = parser::parser();
     let result = parser.parse(tokens);
@@ -80,7 +89,20 @@ fn main() {
                     };
                     fs::write(output_path, json).expect("Failed to write IR file");
                 }
-                Err(e) => eprintln!("Semantic error: {}", e),
+                Err(e) => {
+                    // Create error formatter for better error messages
+                    use error::*;
+                    let formatter = ErrorFormatter::new(code.clone(), args.input.clone());
+
+                    // For now, create a simple error without span (Phase 3 will add spans)
+                    let err = CompileError::error(e);
+
+                    // Use new format (without span for now, will add in full Phase 3)
+                    eprintln!("[ERROR] {}", err.title);
+                    if let Some(suggestion) = &err.suggestion {
+                        eprintln!("\n  help: {}", suggestion);
+                    }
+                }
             }
         }
         Err(errs) => {
