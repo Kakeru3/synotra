@@ -534,7 +534,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 just(Token::Range)
                     .ignore_then(expr.clone())
                     .then_ignore(just(Token::RParen))
-                    .map(|end| Some(end)),
+                    .map(Some),
                 // Collection loop: )
                 just(Token::RParen).map(|_| None),
             )))

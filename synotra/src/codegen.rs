@@ -184,11 +184,7 @@ impl<'a> Codegen<'a> {
                 self.gen_expr(expr);
             }
             Stmt::Return(expr) => {
-                let val = if let Some(e) = expr {
-                    Some(self.gen_expr(e))
-                } else {
-                    None
-                };
+                let val = expr.as_ref().map(|e| self.gen_expr(e));
                 self.current_block_mut().terminator = Terminator::Return(val);
             }
             // Stmt::Send removed from AST
