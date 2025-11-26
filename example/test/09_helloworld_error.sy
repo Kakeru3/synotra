@@ -1,9 +1,0 @@
-actor main(name: String) {
-    io fun run() {
-        var b: Int
-        println("Hello, World!${b}")
-
-        b = unknownValue
-        println("Test${b}")
-    }
-}

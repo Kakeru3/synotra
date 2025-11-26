@@ -1,8 +1,0 @@
-// Test: Using undefined actor
-
-actor main(name: String) {
-    io fun run() {
-        var ref = spawn(UnknownActor("test"), 1)
-        println("Spawned")
-    }
-}

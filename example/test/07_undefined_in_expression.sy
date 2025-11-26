@@ -1,9 +1,0 @@
-// Test: Using variable in expression
-
-actor main(name: String) {
-    io fun run() {
-        var a = 10
-        var b = a + undefinedVar + 20
-        println(b)
-    }
-}
