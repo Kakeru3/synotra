@@ -26,7 +26,7 @@ echo "==> Compiling $SY_FILE..."
 
 echo "==> Running $SYI_FILE..."
 cd syvm
-cargo run --release -- "../$SYI_FILE"
+cargo run -q --release -- "../$SYI_FILE"
 cd ..
 
 echo ""

@@ -1,0 +1,10 @@
+// Test: Undefined variables in data message
+
+data message TestMsg(val x: Int, val y: Int)
+
+actor main(name: String) {
+    io fun run() {
+        var msg = TestMsg(undefinedX, undefinedY)
+        println(msg)
+    }
+}

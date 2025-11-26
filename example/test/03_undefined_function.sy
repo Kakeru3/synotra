@@ -1,0 +1,8 @@
+// Test: Undefined function call
+
+actor main(name: String) {
+    io fun run() {
+        var result = unknownFunction(123)
+        println(result)
+    }
+}

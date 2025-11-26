@@ -1,6 +1,34 @@
 use crate::ast::*;
 use std::collections::HashMap;
 
+/// Collects errors during semantic analysis
+#[derive(Debug, Clone)]
+pub struct ErrorCollector {
+    pub errors: Vec<String>,
+}
+
+impl ErrorCollector {
+    pub fn new() -> Self {
+        ErrorCollector { errors: Vec::new() }
+    }
+
+    pub fn push(&mut self, error: String) {
+        self.errors.push(error);
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    pub fn to_result(&self) -> Result<(), String> {
+        if self.has_errors() {
+            Err(self.errors.join("\n"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
     scopes: Vec<HashMap<String, Symbol>>,
@@ -8,7 +36,7 @@ pub struct SymbolTable {
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
-    Variable(Type, bool),                    // Type, is_mutable
+    Variable(Type, bool, bool), // Type, is_mutable, is_initialized
     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
     Actor(String),
     Message(String),
@@ -44,6 +72,12 @@ impl SymbolTable {
         }
         None
     }
+
+    /// Check if a name exists in the current (innermost) scope only
+    pub fn lookup_in_current_scope(&self, name: &str) -> Option<&Symbol> {
+        self.scopes.last().and_then(|scope| scope.get(name))
+    }
+
     pub fn update(&mut self, name: &str, new_symbol: Symbol) -> bool {
         for scope in self.scopes.iter_mut().rev() {
             if scope.contains_key(name) {
@@ -188,7 +222,7 @@ fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), Stri
     for param in &actor.params {
         symbols.insert(
             param.name.clone(),
-            Symbol::Variable(param.ty.clone(), false),
+            Symbol::Variable(param.ty.clone(), false, true), // params are always initialized
         );
 
         // Validate ActorRef types in actor parameters
@@ -201,7 +235,7 @@ fn analyze_actor(actor: &ActorDef, symbols: &mut SymbolTable) -> Result<(), Stri
             ActorMember::Field(field) => {
                 symbols.insert(
                     field.name.clone(),
-                    Symbol::Variable(field.ty.clone(), field.is_mutable),
+                    Symbol::Variable(field.ty.clone(), field.is_mutable, true), // fields are initialized
                 );
             }
             ActorMember::Method(method) => {
@@ -237,9 +271,12 @@ fn analyze_function(func: &FunctionDef, symbols: &mut SymbolTable) -> Result<(),
         return Err(format!("IO function '{}' cannot have a return type. IO functions should only perform side effects.", func.name));
     }
 
-    // Check: Pure functions must have a return type if they return a value
-    // (We can't easily check if the body returns a value without full flow analysis,
-    // but we can enforce that if a return type is present, it's not Unit)
+    // Check: Pure functions must have a return type
+    if !func.is_io && func.return_type.is_none() {
+        return Err(format!("Pure function '{}' must have a return type. Use 'io fun' for functions with side effects only.", func.name));
+    }
+
+    // Check: Pure functions cannot explicitly return Unit
     if !func.is_io {
         if let Some(Type::Unit) = func.return_type {
             return Err(format!("Pure function '{}' cannot explicitly return Unit. If it returns nothing, omit the return type.", func.name));
@@ -251,21 +288,35 @@ fn analyze_function(func: &FunctionDef, symbols: &mut SymbolTable) -> Result<(),
     for param in &func.params {
         symbols.insert(
             param.name.clone(),
-            Symbol::Variable(param.ty.clone(), false),
+            Symbol::Variable(param.ty.clone(), false, true), // params are always initialized
         );
     }
 
+    // Collect errors from all statements
+    let mut error_collector = ErrorCollector::new();
     for stmt in &func.body.stmts {
-        analyze_stmt(stmt, symbols, func.is_io)?;
+        if let Err(e) = analyze_stmt(stmt, symbols, func.is_io) {
+            error_collector.push(e);
+        }
     }
 
     symbols.exit_scope();
-    Ok(())
+
+    // Return all collected errors
+    error_collector.to_result()
 }
 
 fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> Result<(), String> {
     match stmt {
         Stmt::Let(name, ty_opt, expr) => {
+            // Check for duplicate definition in current scope
+            if symbols.lookup_in_current_scope(name).is_some() {
+                return Err(format!(
+                    "Duplicate definition: '{}' is already defined in this scope",
+                    name
+                ));
+            }
+
             let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
             if let Some(expected_ty) = ty_opt {
                 if !check_type_compatibility(expected_ty, &expr_ty) {
@@ -275,32 +326,56 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                     ));
                 }
             }
-            symbols.insert(name.clone(), Symbol::Variable(expr_ty, false));
+            symbols.insert(name.clone(), Symbol::Variable(expr_ty, false, true));
+            // let is always initialized
         }
-        Stmt::Var(name, ty_opt, init) => {
-            let init_ty = analyze_expr(init, symbols, is_io_context)?;
-            let var_ty = if let Some(ty) = ty_opt {
-                if init_ty != *ty {
+        Stmt::Var(name, ty_opt, init_opt) => {
+            // Check for duplicate definition in current scope
+            if symbols.lookup_in_current_scope(name).is_some() {
+                return Err(format!(
+                    "Duplicate definition: '{}' is already defined in this scope",
+                    name
+                ));
+            }
+
+            let var_ty = match (ty_opt, init_opt) {
+                // Case 1: Both type and initializer
+                (Some(ty), Some(init)) => {
+                    let init_ty = analyze_expr(init, symbols, is_io_context)?;
+                    if !check_type_compatibility(ty, &init_ty) {
+                        return Err(format!(
+                            "Type mismatch in variable declaration: expected {:?}, got {:?}",
+                            ty, init_ty
+                        ));
+                    }
+                    ty.clone()
+                }
+                // Case 2: Only initializer (type inference)
+                (None, Some(init)) => analyze_expr(init, symbols, is_io_context)?,
+                // Case 3: Only type annotation (no initializer) - this is valid
+                (Some(ty), None) => ty.clone(),
+                // Case 4: Neither type nor initializer - ERROR
+                (None, None) => {
                     return Err(format!(
-                        "Type mismatch in variable declaration: expected {:?}, got {:?}",
-                        ty, init_ty
+                        "Variable '{}' must have either a type annotation or an initializer",
+                        name
                     ));
                 }
-                ty.clone()
-            } else {
-                init_ty
             };
-            // println!("DEBUG: Defining variable '{}' with type {:?}", name, var_ty);
-            symbols.insert(name.clone(), Symbol::Variable(var_ty, true));
+
+            // Var is initialized if init_opt.is_some()
+            let is_initialized = init_opt.is_some();
+            symbols.insert(name.clone(), Symbol::Variable(var_ty, true, is_initialized));
         }
         Stmt::Assign(name, expr) => {
             // Check variable exists and is mutable
-            if let Some(sym) = symbols.lookup(name) {
+            let (var_ty, is_mutable) = if let Some(sym) = symbols.lookup(name) {
                 match sym {
-                    Symbol::Variable(_, is_mutable) => {
-                        if !is_mutable {
+                    Symbol::Variable(var_ty, is_mutable, _) => {
+                        if !*is_mutable {
                             return Err(format!("Cannot assign to immutable variable '{}'", name));
                         }
+                        (var_ty.clone(), *is_mutable)
                     }
                     _ => {
                         return Err(format!(
@@ -311,14 +386,18 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
                 }
             } else {
                 return Err(format!("Variable '{}' not declared", name));
-            }
+            };
+
+            // Analyze expression after releasing the borrow
             analyze_expr(expr, symbols, is_io_context)?;
+            // After assignment, variable is initialized
+            symbols.update(name, Symbol::Variable(var_ty, is_mutable, true));
         }
         Stmt::AssignIndex(name, index, value) => {
             // Check variable exists and is mutable collection
             if let Some(sym) = symbols.lookup(name) {
                 match sym {
-                    Symbol::Variable(ty, is_mutable) => {
+                    Symbol::Variable(ty, is_mutable, is_initialized) => {
                         if !is_mutable {
                             return Err(format!(
                                 "Cannot assign to immutable collection '{}'",
@@ -377,7 +456,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             analyze_expr(end, symbols, is_io_context)?;
 
             symbols.enter_scope();
-            symbols.insert(iter.clone(), Symbol::Variable(Type::Int, false)); // Iterator is immutable int
+            symbols.insert(iter.clone(), Symbol::Variable(Type::Int, false, true)); // Iterator is immutable int, initialized
 
             for s in &body.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
@@ -404,7 +483,7 @@ fn analyze_stmt(stmt: &Stmt, symbols: &mut SymbolTable, is_io_context: bool) -> 
             };
 
             symbols.enter_scope();
-            symbols.insert(iter.clone(), Symbol::Variable(item_ty, false));
+            symbols.insert(iter.clone(), Symbol::Variable(item_ty, false, true)); // initialized
             for s in &body.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
             }
@@ -428,7 +507,12 @@ fn analyze_expr(
         Expr::Variable(name) => {
             if let Some(sym) = symbols.lookup(name) {
                 match sym {
-                    Symbol::Variable(ty, _) => Ok(ty.clone()),
+                    Symbol::Variable(ty, _, is_initialized) => {
+                        if !is_initialized {
+                            return Err(format!("Uninitialized variable: {}", name));
+                        }
+                        Ok(ty.clone())
+                    }
                     _ => Err(format!("{} is not a variable", name)),
                 }
             } else {
@@ -467,7 +551,7 @@ fn analyze_expr(
 
             // Check if it's a method call on a variable
             if let Expr::Variable(var_name) = target.as_ref() {
-                if let Some(Symbol::Variable(ty, _)) = symbols.lookup(var_name) {
+                if let Some(Symbol::Variable(ty, _, _)) = symbols.lookup(var_name) {
                     // eprintln!(
                     //     "DEBUG: Method call '{}' on variable '{}' with type {:?}",
                     //     method, var_name, ty
@@ -500,6 +584,14 @@ fn analyze_expr(
 
             // Analyze target type (skip if it's a global function call)
             let target_ty = if is_global_function {
+                // For global functions, check if the function exists in symbol table
+                // (println, print, and other built-ins will be checked during codegen)
+                if !["println", "print"].contains(&method.as_str()) {
+                    // Check if this global function is defined
+                    if symbols.lookup(method).is_none() {
+                        return Err(format!("Undefined function '{}'", method));
+                    }
+                }
                 Type::Unknown // Placeholder, won't be used
             } else {
                 analyze_expr(target, symbols, is_io_context)?
@@ -522,8 +614,10 @@ fn analyze_expr(
                                         if let Expr::Variable(var_name) = target.as_ref() {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
-                                            symbols
-                                                .update(var_name, Symbol::Variable(new_ty, true));
+                                            symbols.update(
+                                                var_name,
+                                                Symbol::Variable(new_ty, true, true),
+                                            );
                                             // Assuming mutable
                                         }
                                     }
@@ -590,7 +684,8 @@ fn analyze_expr(
                                 if changed {
                                     if let Expr::Variable(var_name) = target.as_ref() {
                                         let new_ty = Type::Generic(name.clone(), new_args);
-                                        symbols.update(var_name, Symbol::Variable(new_ty, true));
+                                        symbols
+                                            .update(var_name, Symbol::Variable(new_ty, true, true));
                                     }
                                 }
                             }
@@ -613,8 +708,10 @@ fn analyze_expr(
                                         if let Expr::Variable(var_name) = target.as_ref() {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
-                                            symbols
-                                                .update(var_name, Symbol::Variable(new_ty, true));
+                                            symbols.update(
+                                                var_name,
+                                                Symbol::Variable(new_ty, true, true),
+                                            );
                                         }
                                     }
                                 }
@@ -746,16 +843,27 @@ fn analyze_expr(
                     }
 
                     // Analyze and type-check each argument
+                    let mut errors = Vec::new();
                     for (i, arg) in args.iter().enumerate() {
-                        let arg_type = analyze_expr(arg, symbols, is_io_context)?;
-                        let expected_type = &fields[i].1;
-
-                        if !check_type_compatibility(&arg_type, expected_type) {
-                            return Err(format!(
-                                "Data message '{}' field '{}' expects type {:?}, got {:?}",
-                                name, fields[i].0, expected_type, arg_type
-                            ));
+                        match analyze_expr(arg, symbols, is_io_context) {
+                            Ok(arg_type) => {
+                                let expected_type = &fields[i].1;
+                                if !check_type_compatibility(&arg_type, expected_type) {
+                                    errors.push(format!(
+                                        "Data message '{}' field '{}' expects type {:?}, got {:?}",
+                                        name, fields[i].0, expected_type, arg_type
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                errors.push(e);
+                            }
                         }
+                    }
+
+                    // If there were any errors, return them all
+                    if !errors.is_empty() {
+                        return Err(errors.join("\n"));
                     }
 
                     // Return the constructed message type

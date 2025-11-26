@@ -1,4 +1,4 @@
-// Hello World - A simple Synotra program
+// Example 01: Hello World with Command Line Name
 
 actor main(name: String) {
     io fun run() {

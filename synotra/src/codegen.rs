@@ -152,8 +152,20 @@ impl<'a> Codegen<'a> {
                     .instrs
                     .push(Instruction::Assign(idx, val));
             }
-            Stmt::Var(name, _, expr) => {
-                let val = self.gen_expr(expr);
+            Stmt::Var(name, ty_opt, expr_opt) => {
+                let val = if let Some(expr) = expr_opt {
+                    // Has initializer - use it
+                    self.gen_expr(expr)
+                } else {
+                    // No initializer - use default value based on type
+                    // For now, default to 0 for Int, empty string for String, etc.
+                    match ty_opt {
+                        Some(Type::Int) => Value::ConstInt(0),
+                        Some(Type::String) => Value::ConstString("".to_string()),
+                        Some(Type::Bool) => Value::ConstBool(false),
+                        _ => Value::ConstInt(0), // Fallback default
+                    }
+                };
                 let idx = self.get_or_alloc_local(name);
                 self.current_block_mut()
                     .instrs

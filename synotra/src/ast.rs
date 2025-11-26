@@ -1,3 +1,18 @@
+use crate::error::Span;
+
+/// Wrapper type that adds position information to AST nodes
+#[derive(Debug, Clone)]
+pub struct Spanned<T> {
+    pub node: T,
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    pub fn new(node: T, span: Span) -> Self {
+        Spanned { node, span }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub definitions: Vec<Definition>,
@@ -101,8 +116,8 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let(String, Option<Type>, Expr),
-    Var(String, Option<Type>, Expr),
-    Assign(String, Expr),                      // variable reassignment
+    Var(String, Option<Type>, Option<Expr>), // var name: Type = init (init is optional)
+    Assign(String, Expr),                    // variable reassignment
     AssignIndex(String, Box<Expr>, Box<Expr>), // name[index] = value
     Expr(Expr),
     Return(Option<Expr>),

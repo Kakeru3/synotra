@@ -1,0 +1,8 @@
+// Test: Undefined variable error
+
+actor main(name: String) {
+    io fun run() {
+        var x = unknownVariable
+        println("Hello")
+    }
+}

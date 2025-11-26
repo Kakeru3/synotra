@@ -476,8 +476,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         let var_stmt = just(Token::Var)
             .ignore_then(ident)
             .then(just(Token::Colon).ignore_then(type_parser.clone()).or_not())
-            .then_ignore(just(Token::Equals))
-            .then(expr.clone())
+            .then(just(Token::Equals).ignore_then(expr.clone()).or_not())
             .map(|((name, ty), init)| Stmt::Var(name, ty, init));
 
         let return_stmt = just(Token::Return)

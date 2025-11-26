@@ -1,0 +1,9 @@
+// Test: Duplicate variable definition
+
+actor main(name: String) {
+    io fun run() {
+        var x = 10
+        var x = 20  // Should error: duplicate definition
+        println(x)
+    }
+}

@@ -10,5 +10,9 @@ actor main(name: String) {
         var y = 20
         println("x = ${x}, y = ${y}")
         println("Sum: ${x + y}")
+
+        var z: Int
+        z = 30
+        println("z = ${z}")
     }
 }

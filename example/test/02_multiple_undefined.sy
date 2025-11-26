@@ -1,0 +1,10 @@
+// Test: Multiple undefined variables
+
+actor main(name: String) {
+    io fun run() {
+        var a = foo
+        var b = bar
+        var c = baz
+        println("Test")
+    }
+}

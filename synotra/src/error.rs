@@ -13,6 +13,95 @@ impl Span {
     }
 }
 
+/// Types of compile errors with standardized messages
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorKind {
+    UndefinedVariable { name: String },
+    UninitializedVariable { name: String },
+    TypeMismatch { expected: String, found: String },
+    DuplicateDefinition { name: String },
+    InvalidOperation { op: String, ty: String },
+    MissingReturn,
+    Other { message: String },
+}
+
+impl ErrorKind {
+    /// Get a user-friendly title for the error
+    pub fn title(&self) -> String {
+        match self {
+            ErrorKind::UndefinedVariable { name } => {
+                format!("Undefined variable '{}'", name)
+            }
+            ErrorKind::UninitializedVariable { name } => {
+                format!("Use of uninitialized variable '{}'", name)
+            }
+            ErrorKind::TypeMismatch { expected, found } => {
+                format!("Type mismatch: expected {}, found {}", expected, found)
+            }
+            ErrorKind::DuplicateDefinition { name } => {
+                format!("Duplicate definition of '{}'", name)
+            }
+            ErrorKind::InvalidOperation { op, ty } => {
+                format!("Cannot apply operator '{}' to type {}", op, ty)
+            }
+            ErrorKind::MissingReturn => "Missing return statement".to_string(),
+            ErrorKind::Other { message } => message.clone(),
+        }
+    }
+
+    /// Get explanation of why this error occurred
+    pub fn explanation(&self) -> Option<String> {
+        match self {
+            ErrorKind::UndefinedVariable { name } => Some(format!(
+                "The variable '{}' is not defined in this scope",
+                name
+            )),
+            ErrorKind::UninitializedVariable { name } => Some(format!(
+                "The variable '{}' is declared but has not been assigned a value yet",
+                name
+            )),
+            ErrorKind::TypeMismatch { expected, found } => Some(format!(
+                "Expected a value of type {}, but got {}",
+                expected, found
+            )),
+            ErrorKind::DuplicateDefinition { name } => {
+                Some(format!("'{}' is already defined in this scope", name))
+            }
+            ErrorKind::InvalidOperation { op, ty } => Some(format!(
+                "The operator '{}' cannot be used with values of type {}",
+                op, ty
+            )),
+            ErrorKind::MissingReturn => Some("Pure functions must return a value".to_string()),
+            ErrorKind::Other { .. } => None,
+        }
+    }
+
+    /// Get suggestion on how to fix the error
+    pub fn suggestion(&self) -> Option<String> {
+        match self {
+            ErrorKind::UndefinedVariable { .. } => {
+                Some("Make sure the variable is declared before using it".to_string())
+            }
+            ErrorKind::UninitializedVariable { .. } => {
+                Some("Assign a value to the variable before using it".to_string())
+            }
+            ErrorKind::TypeMismatch { .. } => {
+                Some("Check that the value's type matches what is expected".to_string())
+            }
+            ErrorKind::DuplicateDefinition { .. } => {
+                Some("Use a different name or remove one of the definitions".to_string())
+            }
+            ErrorKind::InvalidOperation { .. } => Some(
+                "Use a different operator or convert the value to a compatible type".to_string(),
+            ),
+            ErrorKind::MissingReturn => {
+                Some("Add a return statement at the end of the function".to_string())
+            }
+            ErrorKind::Other { .. } => None,
+        }
+    }
+}
+
 /// Error severity level
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorLevel {
@@ -47,6 +136,17 @@ impl CompileError {
             span: None,
             explanation: None,
             suggestion: None,
+        }
+    }
+
+    /// Create an error from an ErrorKind with automatic title, explanation, and suggestion
+    pub fn from_kind(kind: ErrorKind) -> Self {
+        CompileError {
+            level: ErrorLevel::Error,
+            title: kind.title(),
+            span: None,
+            explanation: kind.explanation(),
+            suggestion: kind.suggestion(),
         }
     }
 
@@ -228,6 +328,35 @@ impl ErrorFormatter {
         }
 
         output
+    }
+
+    /// Find the position of an identifier in the source code (for span estimation)
+    /// Returns the first occurrence after the given hint offset
+    pub fn find_identifier(&self, identifier: &str, hint_offset: usize) -> Option<Span> {
+        let bytes = self.source_code.as_bytes();
+
+        // Search for identifier starting from hint
+        for i in hint_offset..bytes.len() {
+            if i + identifier.len() > bytes.len() {
+                break;
+            }
+
+            // Check if we have a match
+            if &bytes[i..i + identifier.len()] == identifier.as_bytes() {
+                // Verify it's a complete identifier (not part of another word)
+                let before_ok =
+                    i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_';
+                let after_ok = i + identifier.len() >= bytes.len()
+                    || (!bytes[i + identifier.len()].is_ascii_alphanumeric()
+                        && bytes[i + identifier.len()] != b'_');
+
+                if before_ok && after_ok {
+                    return Some(Span::new(i, i + identifier.len()));
+                }
+            }
+        }
+
+        None
     }
 }
 
