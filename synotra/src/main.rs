@@ -89,112 +89,66 @@ fn main() {
                     };
                     fs::write(output_path, json).expect("Failed to write IR file");
                 }
-                Err(e) => {
+                Err(errors) => {
                     // Create error formatter for better error messages
                     use error::*;
                     let formatter = ErrorFormatter::new(code.clone(), args.input.clone());
 
-                    // Check if there are multiple errors (separated by newlines)
-                    let error_messages: Vec<&str> = e.split('\n').collect();
-
                     // Track seen errors to avoid duplicates
                     let mut seen_errors = std::collections::HashSet::new();
 
-                    for error_msg in error_messages {
-                        // Skip if we've already seen this exact error
-                        if !seen_errors.insert(error_msg) {
+                    for mut err in errors {
+                        // Deduplication based on title
+                        if !seen_errors.insert(err.title.clone()) {
                             continue;
                         }
 
-                        // Match different error patterns
-                        let err = if error_msg.starts_with("Undefined variable:") {
-                            // Extract variable name (e.g., "Undefined variable: foo" -> "foo")
-                            let var_name = error_msg
-                                .strip_prefix("Undefined variable: ")
-                                .unwrap_or("")
-                                .trim()
-                                .to_string();
-
-                            // Use ErrorKind for structured error with explanation and suggestion
-                            let kind = ErrorKind::UndefinedVariable {
-                                name: var_name.clone(),
-                            };
-                            let mut compile_err = CompileError::from_kind(kind);
-
-                            // Try to find the variable in source code
-                            if let Some(span) = formatter.find_identifier(&var_name, 0) {
-                                compile_err = compile_err.with_span(span);
-                            }
-
-                            compile_err
-                        } else if error_msg.starts_with("Duplicate definition:") {
-                            // Extract variable name from "Duplicate definition: 'x' is already defined..."
-                            let var_name = error_msg
-                                .split('\'')
-                                .nth(1)
-                                .unwrap_or("unknown")
-                                .to_string();
-
-                            let kind = ErrorKind::DuplicateDefinition {
-                                name: var_name.clone(),
-                            };
-                            let mut compile_err = CompileError::from_kind(kind);
-
-                            // Try to find the duplicate in source code
-                            if let Some(span) = formatter.find_identifier(&var_name, 0) {
-                                compile_err = compile_err.with_span(span);
-                            }
-
-                            compile_err
-                        } else if error_msg.starts_with("Undefined function") {
-                            // Extract function name from "Undefined function 'name'"
-                            let func_name = error_msg
-                                .split('\'')
-                                .nth(1)
-                                .unwrap_or("unknown")
-                                .to_string();
-
-                            let kind = ErrorKind::UndefinedVariable { name: func_name };
-                            CompileError::from_kind(kind)
-                        } else if error_msg.starts_with("Uninitialized variable:") {
-                            // Extract variable name from "Uninitialized variable: name"
-                            let var_name = error_msg
-                                .strip_prefix("Uninitialized variable: ")
-                                .unwrap_or("")
-                                .trim()
-                                .to_string();
-
-                            let kind = ErrorKind::UninitializedVariable {
-                                name: var_name.clone(),
-                            };
-                            let mut compile_err = CompileError::from_kind(kind);
-
-                            // Find the first occurrence (declaration) and then find the second occurrence (usage)
-                            if let Some(first_span) = formatter.find_identifier(&var_name, 0) {
-                                // Search for the next occurrence after the declaration
-                                let next_offset = first_span.end;
-                                if let Some(usage_span) =
-                                    formatter.find_identifier(&var_name, next_offset)
-                                {
-                                    compile_err = compile_err.with_span(usage_span);
-                                } else {
-                                    // Fallback to declaration if usage not found
-                                    compile_err = compile_err.with_span(first_span);
+                        // Recover span information if missing
+                        if err.span.is_none() {
+                            if let Some(kind) = &err.kind {
+                                match kind {
+                                    ErrorKind::UndefinedVariable { name }
+                                    | ErrorKind::DuplicateDefinition { name }
+                                    | ErrorKind::ImmutableAssignment { name }
+                                    | ErrorKind::UnknownFunction { name } => {
+                                        if let Some(span) = formatter.find_identifier(&name, 0) {
+                                            err.span = Some(span);
+                                        }
+                                    }
+                                    ErrorKind::UninitializedVariable { name } => {
+                                        // Find declaration first
+                                        if let Some(decl_span) = formatter.find_identifier(&name, 0)
+                                        {
+                                            // Find usage after declaration
+                                            if let Some(usage_span) =
+                                                formatter.find_identifier(&name, decl_span.end)
+                                            {
+                                                err.span = Some(usage_span);
+                                            } else {
+                                                // Fallback to declaration
+                                                err.span = Some(decl_span);
+                                            }
+                                        }
+                                    }
+                                    ErrorKind::UnknownField { field, .. } => {
+                                        if let Some(span) = formatter.find_identifier(&field, 0) {
+                                            err.span = Some(span);
+                                        }
+                                    }
+                                    ErrorKind::UnknownMethod { method, .. } => {
+                                        if let Some(span) = formatter.find_identifier(&method, 0) {
+                                            err.span = Some(span);
+                                        }
+                                    }
+                                    // For other errors, we might need more context or just print without span
+                                    _ => {}
                                 }
                             }
+                        }
 
-                            compile_err
-                        } else if error_msg.contains("must have a return type") {
-                            // Pure function missing return type
-                            CompileError::from_kind(ErrorKind::MissingReturn)
-                        } else {
-                            // Generic error without position
-                            CompileError::error(error_msg.to_string())
-                        };
-
-                        // Format and print the error
                         eprint!("{}", formatter.format_compile_error(&err));
                     }
+                    std::process::exit(1);
                 }
             }
         }

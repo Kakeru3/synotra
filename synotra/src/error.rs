@@ -22,6 +22,12 @@ pub enum ErrorKind {
     DuplicateDefinition { name: String },
     InvalidOperation { op: String, ty: String },
     MissingReturn,
+    ImmutableAssignment { name: String },
+    UnknownFunction { name: String },
+    ArgumentCountMismatch { expected: usize, found: usize },
+    UnknownField { field: String, ty: String },
+    UnknownMethod { method: String, ty: String },
+    IOError { message: String },
     Other { message: String },
 }
 
@@ -42,9 +48,28 @@ impl ErrorKind {
                 format!("Duplicate definition of '{}'", name)
             }
             ErrorKind::InvalidOperation { op, ty } => {
-                format!("Cannot apply operator '{}' to type {}", op, ty)
+                format!("Invalid operation '{}' on type {}", op, ty)
             }
             ErrorKind::MissingReturn => "Missing return statement".to_string(),
+            ErrorKind::ImmutableAssignment { name } => {
+                format!("Cannot assign to immutable variable '{}'", name)
+            }
+            ErrorKind::UnknownFunction { name } => {
+                format!("Unknown function '{}'", name)
+            }
+            ErrorKind::ArgumentCountMismatch { expected, found } => {
+                format!(
+                    "Argument count mismatch: expected {}, found {}",
+                    expected, found
+                )
+            }
+            ErrorKind::UnknownField { field, ty } => {
+                format!("Unknown field '{}' on type {}", field, ty)
+            }
+            ErrorKind::UnknownMethod { method, ty } => {
+                format!("Unknown method '{}' on type {}", method, ty)
+            }
+            ErrorKind::IOError { message } => message.clone(),
             ErrorKind::Other { message } => message.clone(),
         }
     }
@@ -71,7 +96,30 @@ impl ErrorKind {
                 "The operator '{}' cannot be used with values of type {}",
                 op, ty
             )),
-            ErrorKind::MissingReturn => Some("Pure functions must return a value".to_string()),
+            ErrorKind::MissingReturn => {
+                Some("Functions with a return type must return a value on all paths".to_string())
+            }
+            ErrorKind::ImmutableAssignment { name } => Some(format!(
+                "The variable '{}' is immutable and cannot be reassigned",
+                name
+            )),
+            ErrorKind::UnknownFunction { name } => Some(format!(
+                "The function '{}' is not defined in this scope",
+                name
+            )),
+            ErrorKind::ArgumentCountMismatch { expected, found } => Some(format!(
+                "The function expects {} arguments but {} were provided",
+                expected, found
+            )),
+            ErrorKind::UnknownField { field, ty } => Some(format!(
+                "The type '{}' does not have a field named '{}'",
+                ty, field
+            )),
+            ErrorKind::UnknownMethod { method, ty } => Some(format!(
+                "The type '{}' does not have a method named '{}'",
+                ty, method
+            )),
+            ErrorKind::IOError { .. } => None,
             ErrorKind::Other { .. } => None,
         }
     }
@@ -95,8 +143,25 @@ impl ErrorKind {
                 "Use a different operator or convert the value to a compatible type".to_string(),
             ),
             ErrorKind::MissingReturn => {
-                Some("Add a return statement at the end of the function".to_string())
+                Some("Ensure all code paths return a value of the expected type".to_string())
             }
+            ErrorKind::ImmutableAssignment { .. } => Some(
+                "Declare the variable with 'var' instead of 'let' to make it mutable".to_string(),
+            ),
+            ErrorKind::UnknownFunction { .. } => {
+                Some("Check the function name for typos or ensure it is imported".to_string())
+            }
+            ErrorKind::ArgumentCountMismatch { .. } => Some(
+                "Check the function definition and provide the correct number of arguments"
+                    .to_string(),
+            ),
+            ErrorKind::UnknownField { .. } => {
+                Some("Check the field name for typos or verify the type definition".to_string())
+            }
+            ErrorKind::UnknownMethod { .. } => {
+                Some("Check the method name for typos or verify the type definition".to_string())
+            }
+            ErrorKind::IOError { .. } => None,
             ErrorKind::Other { .. } => None,
         }
     }
@@ -126,6 +191,7 @@ pub struct CompileError {
     pub span: Option<Span>,
     pub explanation: Option<String>,
     pub suggestion: Option<String>,
+    pub kind: Option<ErrorKind>,
 }
 
 impl CompileError {
@@ -136,6 +202,7 @@ impl CompileError {
             span: None,
             explanation: None,
             suggestion: None,
+            kind: None,
         }
     }
 
@@ -147,6 +214,7 @@ impl CompileError {
             span: None,
             explanation: kind.explanation(),
             suggestion: kind.suggestion(),
+            kind: Some(kind),
         }
     }
 

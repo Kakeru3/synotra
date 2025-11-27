@@ -1,0 +1,18 @@
+// Test file for error reporting
+// Should report:
+// 1. Uninitialized variable usage
+// 2. Undefined variable usage
+
+io fun main() {
+    val x: Int = 10
+    var y: Int
+    
+    // Error: y is not initialized
+    print(y)
+    
+    // Error: z is not defined
+    print(z)
+    
+    y = 20
+    print(y) // OK
+}
