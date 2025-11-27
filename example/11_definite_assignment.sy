@@ -1,0 +1,32 @@
+// Test for Definite Assignment Analysis
+
+io fun main() {
+    var x: Int
+    
+    if (true) {
+        x = 10
+    } else {
+        x = 20
+    }
+    
+    // OK: x is initialized in both branches
+    print(x)
+    
+    var y: Int
+    if (true) {
+        y = 10
+    }
+    
+    // Error: y is not initialized (if condition might be false)
+    print(y)
+    
+    var z: Int
+    if (true) {
+        z = 10
+    } else {
+        // z not initialized here
+    }
+    
+    // Error: z is not initialized
+    print(z)
+}

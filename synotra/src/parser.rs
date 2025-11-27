@@ -257,6 +257,8 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         let atom = choice((
             // ask_expr, // Removed
             int_lit.map(Expr::Literal),
+            just(Token::True).to(Expr::Literal(Literal::Bool(true))),
+            just(Token::False).to(Expr::Literal(Literal::Bool(false))),
             str_lit.map(|s| {
                 use crate::lexer::Token as LexToken;
                 use logos::Logos;

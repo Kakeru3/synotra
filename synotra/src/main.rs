@@ -98,8 +98,15 @@ fn main() {
                     let mut seen_errors = std::collections::HashSet::new();
 
                     for mut err in errors {
-                        // Deduplication based on title
-                        if !seen_errors.insert(err.title.clone()) {
+                        // Deduplication based on title, explanation, and span
+                        let dedup_key = format!(
+                            "{}:{}:{:?}",
+                            err.title,
+                            err.explanation.clone().unwrap_or_default(),
+                            err.span
+                        );
+
+                        if !seen_errors.insert(dedup_key) {
                             continue;
                         }
 

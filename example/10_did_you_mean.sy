@@ -1,0 +1,11 @@
+// Test for "Did you mean?" suggestions
+
+io fun main() {
+    val greeting = "Hello"
+    
+    // Typo: greeting -> greting
+    print(greting)
+    
+    // Typo: print -> prnt
+    prnt("World")
+}

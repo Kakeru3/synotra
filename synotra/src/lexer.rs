@@ -47,6 +47,10 @@ pub enum Token {
     While,
     #[token("in")]
     In,
+    #[token("true")]
+    True,
+    #[token("false")]
+    False,
     #[token("Unit")]
     Unit,
 

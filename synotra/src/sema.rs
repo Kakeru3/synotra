@@ -59,6 +59,16 @@ impl SymbolTable {
         self.scopes.pop();
     }
 
+    pub fn all_symbols(&self) -> Vec<String> {
+        let mut symbols = Vec::new();
+        for scope in &self.scopes {
+            for key in scope.keys() {
+                symbols.push(key.clone());
+            }
+        }
+        symbols
+    }
+
     pub fn insert(&mut self, name: String, symbol: Symbol) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, symbol);
@@ -87,6 +97,87 @@ impl SymbolTable {
             }
         }
         false
+    }
+
+    pub fn get_initialization_snapshot(&self) -> Vec<Vec<(String, bool)>> {
+        self.scopes
+            .iter()
+            .map(|scope| {
+                scope
+                    .iter()
+                    .filter_map(|(name, sym)| {
+                        if let Symbol::Variable(_, _, init) = sym {
+                            Some((name.clone(), *init))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    pub fn restore_initialization_snapshot(&mut self, snapshot: &Vec<Vec<(String, bool)>>) {
+        for (i, scope_snapshot) in snapshot.iter().enumerate() {
+            if i < self.scopes.len() {
+                let scope = &mut self.scopes[i];
+                for (name, init) in scope_snapshot {
+                    if let Some(Symbol::Variable(_, _, ref mut current_init)) = scope.get_mut(name)
+                    {
+                        *current_init = *init;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let s1_len = s1.chars().count();
+    let s2_len = s2.chars().count();
+    let mut matrix = vec![vec![0; s2_len + 1]; s1_len + 1];
+
+    for i in 0..=s1_len {
+        matrix[i][0] = i;
+    }
+    for j in 0..=s2_len {
+        matrix[0][j] = j;
+    }
+
+    for (i, c1) in s1.chars().enumerate() {
+        for (j, c2) in s2.chars().enumerate() {
+            let cost = if c1 == c2 { 0 } else { 1 };
+            matrix[i + 1][j + 1] = std::cmp::min(
+                std::cmp::min(matrix[i][j + 1] + 1, matrix[i + 1][j] + 1),
+                matrix[i][j] + cost,
+            );
+        }
+    }
+    matrix[s1_len][s2_len]
+}
+
+fn find_suggestion(name: &str, symbols: &SymbolTable) -> Option<String> {
+    let mut all_symbols = symbols.all_symbols();
+    // Add built-in functions
+    all_symbols.push("print".to_string());
+    all_symbols.push("println".to_string());
+
+    let mut best_match = None;
+    let mut min_distance = usize::MAX;
+
+    for symbol in all_symbols {
+        let distance = levenshtein_distance(name, &symbol);
+        if distance < min_distance {
+            min_distance = distance;
+            best_match = Some(symbol);
+        }
+    }
+
+    // Threshold for suggestion (e.g., distance <= 3)
+    if min_distance <= 3 && min_distance > 0 {
+        best_match
+    } else {
+        None
     }
 }
 
@@ -465,19 +556,72 @@ fn analyze_stmt(
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
 
+            // Snapshot initialization state before branching
+            let pre_state = symbols.get_initialization_snapshot();
+
+            // Analyze 'then' block
             symbols.enter_scope();
             for s in &then_block.stmts {
                 analyze_stmt(s, symbols, is_io_context)?;
             }
             symbols.exit_scope();
 
-            if let Some(else_block) = else_block {
+            // Capture state after 'then' block
+            let then_state = symbols.get_initialization_snapshot();
+
+            // Restore state to pre-branching for 'else' block
+            symbols.restore_initialization_snapshot(&pre_state);
+
+            // Analyze 'else' block
+            let else_state = if let Some(else_block) = else_block {
                 symbols.enter_scope();
                 for s in &else_block.stmts {
                     analyze_stmt(s, symbols, is_io_context)?;
                 }
                 symbols.exit_scope();
+                symbols.get_initialization_snapshot()
+            } else {
+                pre_state.clone() // If no else, state is same as pre-branching
+            };
+
+            // Merge states: Variable is initialized only if initialized in BOTH branches
+            // We assume the structure of scopes (number of scopes and variables in them)
+            // remains the same because we exited the inner scopes of then/else blocks.
+            // We iterate over variables in pre_state (which covers all visible variables)
+            // and check their status in then_state and else_state.
+
+            let mut merged_state = pre_state.clone();
+
+            for (i, scope) in merged_state.iter_mut().enumerate() {
+                for (name, init) in scope.iter_mut() {
+                    // Find status in then_state
+                    let then_init = if i < then_state.len() {
+                        then_state[i]
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, init)| *init)
+                            .unwrap_or(*init)
+                    } else {
+                        *init
+                    };
+
+                    // Find status in else_state
+                    let else_init = if i < else_state.len() {
+                        else_state[i]
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, init)| *init)
+                            .unwrap_or(*init)
+                    } else {
+                        *init
+                    };
+
+                    // Intersection: initialized only if initialized in both
+                    *init = then_init && else_init;
+                }
             }
+
+            symbols.restore_initialization_snapshot(&merged_state);
         }
         Stmt::While(cond, body) => {
             analyze_expr(cond, symbols, is_io_context)?;
@@ -564,15 +708,59 @@ fn analyze_expr(
                     })),
                 }
             } else {
-                Err(CompileError::from_kind(ErrorKind::UndefinedVariable {
-                    name: name.clone(),
-                }))
+                let mut err =
+                    CompileError::from_kind(ErrorKind::UndefinedVariable { name: name.clone() });
+                if let Some(suggestion) = find_suggestion(name, symbols) {
+                    err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
+                }
+                Err(err)
             }
         }
-        Expr::BinaryOp(lhs, _, rhs) => {
+        Expr::BinaryOp(lhs, op, rhs) => {
             let lhs_ty = analyze_expr(lhs, symbols, is_io_context)?;
-            let _rhs_ty = analyze_expr(rhs, symbols, is_io_context)?;
-            Ok(lhs_ty)
+            let rhs_ty = analyze_expr(rhs, symbols, is_io_context)?;
+
+            match op {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    if !check_type_compatibility(&Type::Int, &lhs_ty) {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: "Int".to_string(),
+                            found: format!("{:?}", lhs_ty),
+                        }));
+                    }
+                    if !check_type_compatibility(&Type::Int, &rhs_ty) {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: "Int".to_string(),
+                            found: format!("{:?}", rhs_ty),
+                        }));
+                    }
+                    Ok(Type::Int)
+                }
+                BinaryOp::Eq | BinaryOp::Ne => {
+                    if !check_type_compatibility(&lhs_ty, &rhs_ty) {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: format!("{:?}", lhs_ty),
+                            found: format!("{:?}", rhs_ty),
+                        }));
+                    }
+                    Ok(Type::Bool)
+                }
+                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                    if !check_type_compatibility(&Type::Int, &lhs_ty) {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: "Int".to_string(),
+                            found: format!("{:?}", lhs_ty),
+                        }));
+                    }
+                    if !check_type_compatibility(&Type::Int, &rhs_ty) {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: "Int".to_string(),
+                            found: format!("{:?}", rhs_ty),
+                        }));
+                    }
+                    Ok(Type::Bool)
+                }
+            }
         }
         Expr::Index(target, index) => {
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
@@ -639,9 +827,13 @@ fn analyze_expr(
                 if !["println", "print"].contains(&method.as_str()) {
                     // Check if this global function is defined
                     if symbols.lookup(method).is_none() {
-                        return Err(CompileError::from_kind(ErrorKind::UnknownFunction {
+                        let mut err = CompileError::from_kind(ErrorKind::UnknownFunction {
                             name: method.clone(),
-                        }));
+                        });
+                        if let Some(suggestion) = find_suggestion(method, symbols) {
+                            err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
+                        }
+                        return Err(err);
                     }
                 }
                 Type::Unknown // Placeholder, won't be used
@@ -929,9 +1121,15 @@ fn analyze_expr(
                 Some(_) => Err(CompileError::from_kind(ErrorKind::Other {
                     message: format!("'{}' is not a data message", name),
                 })),
-                None => Err(CompileError::from_kind(ErrorKind::Other {
-                    message: format!("Undefined data message '{}'", name),
-                })),
+                None => {
+                    let mut err = CompileError::from_kind(ErrorKind::Other {
+                        message: format!("Undefined data message '{}'", name),
+                    });
+                    if let Some(suggestion) = find_suggestion(name, symbols) {
+                        err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
+                    }
+                    Err(err)
+                }
             }
         }
         Expr::Spawn { actor_type, args } => {
@@ -947,9 +1145,15 @@ fn analyze_expr(
                         actor_type.clone(),
                     ))))
                 }
-                _ => Err(CompileError::from_kind(ErrorKind::Other {
-                    message: format!("Unknown actor type: {}", actor_type),
-                })),
+                _ => {
+                    let mut err = CompileError::from_kind(ErrorKind::Other {
+                        message: format!("Unknown actor type: {}", actor_type),
+                    });
+                    if let Some(suggestion) = find_suggestion(actor_type, symbols) {
+                        err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
+                    }
+                    Err(err)
+                }
             }
         }
         Expr::FieldAccess(expr, field) => {

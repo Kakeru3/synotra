@@ -1,0 +1,19 @@
+// Test for improved type mismatch errors
+
+io fun main() {
+    val x = 10
+    val s = "hello"
+    
+    // Error: Expected Int, found String
+    val res = x + s
+    
+    // Error: Expected Int, found String
+    if (x > s) {
+        print("Greater")
+    }
+    
+    // Error: Type mismatch: Int vs String
+    if (x == s) {
+        print("Equal")
+    }
+}
