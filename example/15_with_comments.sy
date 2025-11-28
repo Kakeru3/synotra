@@ -1,0 +1,7 @@
+// This is a comment
+io fun main() {
+    // Another comment
+    val x = 
+    val y = 10
+    print(y)
+}

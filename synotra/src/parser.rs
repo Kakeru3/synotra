@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::error::Span;
 use crate::lexer::Token;
 use chumsky::prelude::*;
 
@@ -34,7 +35,12 @@ fn parse_comparison(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
         };
         *pos += 1;
         let right = parse_additive(tokens, pos)?;
-        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+        // TODO: Calculate proper span for binary op
+        let span = Span::new(left.span.start, right.span.end);
+        left = Expr {
+            kind: ExprKind::BinaryOp(Box::new(left), op, Box::new(right)),
+            span,
+        };
     }
 
     Ok(left)
@@ -51,7 +57,11 @@ fn parse_additive(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
         };
         *pos += 1;
         let right = parse_multiplicative(tokens, pos)?;
-        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+        let span = Span::new(left.span.start, right.span.end);
+        left = Expr {
+            kind: ExprKind::BinaryOp(Box::new(left), op, Box::new(right)),
+            span,
+        };
     }
 
     Ok(left)
@@ -68,7 +78,11 @@ fn parse_multiplicative(tokens: &[Token], pos: &mut usize) -> Result<Expr, Strin
         };
         *pos += 1;
         let right = parse_postfix(tokens, pos)?;
-        left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+        let span = Span::new(left.span.start, right.span.end);
+        left = Expr {
+            kind: ExprKind::BinaryOp(Box::new(left), op, Box::new(right)),
+            span,
+        };
     }
 
     Ok(left)
@@ -84,7 +98,11 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                 let index = parse_comparison(tokens, pos)?;
                 if *pos < tokens.len() && tokens[*pos] == Token::RBracket {
                     *pos += 1; // Skip ']'
-                    expr = Expr::Index(Box::new(expr), Box::new(index));
+                    let span = Span::new(expr.span.start, index.span.end + 1); // Approximation
+                    expr = Expr {
+                        kind: ExprKind::Index(Box::new(expr), Box::new(index)),
+                        span,
+                    };
                 } else {
                     return Err("Expected ']'".to_string());
                 }
@@ -112,13 +130,21 @@ fn parse_postfix(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
 
                             if *pos < tokens.len() && tokens[*pos] == Token::RParen {
                                 *pos += 1; // Skip ')'
-                                expr = Expr::Call(Box::new(expr), method_name.clone(), args);
+                                let span = Span::new(expr.span.start, 0); // TODO: better span
+                                expr = Expr {
+                                    kind: ExprKind::Call(Box::new(expr), method_name.clone(), args),
+                                    span,
+                                };
                             } else {
                                 return Err("Expected ')'".to_string());
                             }
                         } else {
                             // Field access (no parentheses)
-                            expr = Expr::FieldAccess(Box::new(expr), method_name.clone());
+                            let span = Span::new(expr.span.start, 0); // TODO: better span
+                            expr = Expr {
+                                kind: ExprKind::FieldAccess(Box::new(expr), method_name.clone()),
+                                span,
+                            };
                         }
                     } else {
                         return Err("Expected field or method name after '.'".to_string());
@@ -138,15 +164,24 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
         return Err("Unexpected end of expression".to_string());
     }
 
+    // Dummy span for now, since tokens don't carry span info in this helper
+    let dummy_span = Span::new(0, 0);
+
     match &tokens[*pos] {
         Token::Int(i) => {
             *pos += 1;
-            Ok(Expr::Literal(Literal::Int(*i)))
+            Ok(Expr {
+                kind: ExprKind::Literal(Literal::Int(*i)),
+                span: dummy_span,
+            })
         }
         Token::String(s) => {
             let s = s.clone();
             *pos += 1;
-            Ok(Expr::Literal(Literal::String(s)))
+            Ok(Expr {
+                kind: ExprKind::Literal(Literal::String(s)),
+                span: dummy_span,
+            })
         }
         Token::Ident(name) => {
             let name = name.clone();
@@ -181,7 +216,10 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
 
                         if *pos < tokens.len() && tokens[*pos] == Token::RParen {
                             *pos += 1; // Skip ')'
-                            return Ok(Expr::Spawn { actor_type, args });
+                            return Ok(Expr {
+                                kind: ExprKind::Spawn { actor_type, args },
+                                span: dummy_span,
+                            });
                         } else {
                             return Err("Expected ')' in spawn expression".to_string());
                         }
@@ -193,7 +231,10 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
                 }
             }
 
-            Ok(Expr::Variable(name))
+            Ok(Expr {
+                kind: ExprKind::Variable(name),
+                span: dummy_span,
+            })
         }
         Token::LParen => {
             *pos += 1; // Skip '('
@@ -250,15 +291,10 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     });
 
     let expr = recursive(|expr| {
-        /* Old ask syntax removed
-        let ask_expr = just(Token::Ask) ...
-        */
-
         let atom = choice((
-            // ask_expr, // Removed
-            int_lit.map(Expr::Literal),
-            just(Token::True).to(Expr::Literal(Literal::Bool(true))),
-            just(Token::False).to(Expr::Literal(Literal::Bool(false))),
+            int_lit.map(|l| ExprKind::Literal(l)),
+            just(Token::True).to(ExprKind::Literal(Literal::Bool(true))),
+            just(Token::False).to(ExprKind::Literal(Literal::Bool(false))),
             str_lit.map(|s| {
                 use crate::lexer::Token as LexToken;
                 use logos::Logos;
@@ -275,8 +311,12 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     if c == '$' && i + 1 < chars.len() && chars[i + 1].1 == '{' {
                         // Found start of interpolation
                         if idx > last_end {
-                            parts
-                                .push(Expr::Literal(Literal::String(s[last_end..idx].to_string())));
+                            parts.push(Expr {
+                                kind: ExprKind::Literal(Literal::String(
+                                    s[last_end..idx].to_string(),
+                                )),
+                                span: Span::new(0, 0), // Dummy span
+                            });
                         }
 
                         // Find end of interpolation
@@ -309,7 +349,10 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                                 parts.push(parsed_expr);
                             } else {
                                 // Fallback: treat as variable name
-                                parts.push(Expr::Variable(expr_str));
+                                parts.push(Expr {
+                                    kind: ExprKind::Variable(expr_str),
+                                    span: Span::new(0, 0),
+                                });
                             }
 
                             last_end = chars[end_var].0 + 1; // Skip '}'
@@ -320,17 +363,24 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 }
 
                 if last_end < len {
-                    parts.push(Expr::Literal(Literal::String(s[last_end..len].to_string())));
+                    parts.push(Expr {
+                        kind: ExprKind::Literal(Literal::String(s[last_end..len].to_string())),
+                        span: Span::new(0, 0),
+                    });
                 }
 
                 if parts.is_empty() {
-                    Expr::Literal(Literal::String("".to_string()))
+                    ExprKind::Literal(Literal::String("".to_string()))
                 } else {
                     let mut expr = parts[0].clone();
                     for part in parts.into_iter().skip(1) {
-                        expr = Expr::BinaryOp(Box::new(expr), BinaryOp::Add, Box::new(part));
+                        let span = Span::new(expr.span.start, part.span.end);
+                        expr = Expr {
+                            kind: ExprKind::BinaryOp(Box::new(expr), BinaryOp::Add, Box::new(part)),
+                            span,
+                        };
                     }
-                    expr
+                    expr.kind
                 }
             }),
             // spawn(ActorType, args) special form
@@ -344,14 +394,19 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                         )
                         .delimited_by(just(Token::LParen), just(Token::RParen)),
                 )
-                .map(|(actor_type, args)| Expr::Spawn {
+                .map(|(actor_type, args)| ExprKind::Spawn {
                     actor_type,
                     args: args.unwrap_or_default(),
                 }),
-            ident.map(Expr::Variable),
+            ident.map(ExprKind::Variable),
             expr.clone()
-                .delimited_by(just(Token::LParen), just(Token::RParen)),
-        ));
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|e| e.kind),
+        ))
+        .map_with_span(|kind, span: std::ops::Range<usize>| Expr {
+            kind,
+            span: Span::new(span.start, span.end),
+        });
 
         let call = atom
             .clone()
@@ -379,45 +434,70 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 ))
                 .repeated(),
             )
-            .foldl(|target, suffix| match suffix {
-                CallSuffix::Index(index) => Expr::Index(Box::new(target), Box::new(index)),
-                CallSuffix::Call(args) => match target {
-                    Expr::Variable(name) => {
-                        if let Some(first_char) = name.chars().next() {
-                            if first_char.is_uppercase() {
-                                // Uppercase: treat as message constructor
-                                Expr::Construct {
-                                    name: name.clone(),
-                                    args,
-                                    field_names: vec![], // Parser doesn't have field names, sema will fill this
+            .foldl(|target, suffix| {
+                let start = target.span.start;
+                // End is approximate, would need suffix span
+                let end = target.span.end; // TODO: extend span
+                let kind = match suffix {
+                    CallSuffix::Index(index) => {
+                        ExprKind::Index(Box::new(target.clone()), Box::new(index))
+                    }
+                    CallSuffix::Call(args) => match target.kind {
+                        ExprKind::Variable(name) => {
+                            if let Some(first_char) = name.chars().next() {
+                                if first_char.is_uppercase() {
+                                    // Uppercase: treat as message constructor
+                                    ExprKind::Construct {
+                                        name: name.clone(),
+                                        args,
+                                        field_names: vec![], // Parser doesn't have field names, sema will fill this
+                                    }
+                                } else {
+                                    ExprKind::Call(
+                                        Box::new(Expr {
+                                            kind: ExprKind::Variable("self".to_string()),
+                                            span: Span::new(start, start + 4),
+                                        }),
+                                        name,
+                                        args,
+                                    )
                                 }
                             } else {
-                                Expr::Call(Box::new(Expr::Variable("self".to_string())), name, args)
+                                ExprKind::Call(
+                                    Box::new(Expr {
+                                        kind: ExprKind::Variable(name),
+                                        span: target.span.clone(),
+                                    }),
+                                    "invoke".to_string(),
+                                    args,
+                                )
+                            }
+                        }
+                        _ => ExprKind::Call(Box::new(target.clone()), "invoke".to_string(), args),
+                    },
+                    CallSuffix::Method(m, args) => {
+                        if let Some(args) = args {
+                            if m == "send" && args.len() == 1 {
+                                ExprKind::Send {
+                                    target: Box::new(target.clone()),
+                                    message: Box::new(args.into_iter().next().unwrap()),
+                                }
+                            } else if m == "ask" && args.len() == 1 {
+                                ExprKind::Ask {
+                                    target: Box::new(target.clone()),
+                                    message: Box::new(args.into_iter().next().unwrap()),
+                                }
+                            } else {
+                                ExprKind::Call(Box::new(target.clone()), m, args)
                             }
                         } else {
-                            Expr::Call(Box::new(Expr::Variable(name)), "invoke".to_string(), args)
+                            ExprKind::FieldAccess(Box::new(target.clone()), m)
                         }
                     }
-                    _ => Expr::Call(Box::new(target), "invoke".to_string(), args),
-                },
-                CallSuffix::Method(m, args) => {
-                    if let Some(args) = args {
-                        if m == "send" && args.len() == 1 {
-                            Expr::Send {
-                                target: Box::new(target),
-                                message: Box::new(args.into_iter().next().unwrap()),
-                            }
-                        } else if m == "ask" && args.len() == 1 {
-                            Expr::Ask {
-                                target: Box::new(target),
-                                message: Box::new(args.into_iter().next().unwrap()),
-                            }
-                        } else {
-                            Expr::Call(Box::new(target), m, args)
-                        }
-                    } else {
-                        Expr::FieldAccess(Box::new(target), m)
-                    }
+                };
+                Expr {
+                    kind,
+                    span: Span::new(start, end), // TODO: improve span
                 }
             });
 
@@ -432,7 +512,13 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     .then(call.clone())
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| {
+                let span = Span::new(lhs.span.start, rhs.span.end);
+                Expr {
+                    kind: ExprKind::BinaryOp(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                }
+            });
 
         let sum = product
             .clone()
@@ -443,7 +529,13 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     .then(product.clone())
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| {
+                let span = Span::new(lhs.span.start, rhs.span.end);
+                Expr {
+                    kind: ExprKind::BinaryOp(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                }
+            });
 
         sum.clone()
             .then(
@@ -458,7 +550,13 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                 .then(sum.clone())
                 .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs)))
+            .foldl(|lhs, (op, rhs)| {
+                let span = Span::new(lhs.span.start, rhs.span.end);
+                Expr {
+                    kind: ExprKind::BinaryOp(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                }
+            })
     });
 
     let stmt = recursive(|stmt| {
@@ -473,40 +571,17 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .then(just(Token::Colon).ignore_then(type_parser.clone()).or_not())
             .then_ignore(just(Token::Equals))
             .then(expr.clone())
-            .map(|((name, ty), init)| Stmt::Let(name, ty, init));
+            .map(|((name, ty), init)| StmtKind::Let(name, ty, init));
 
         let var_stmt = just(Token::Var)
             .ignore_then(ident)
             .then(just(Token::Colon).ignore_then(type_parser.clone()).or_not())
             .then(just(Token::Equals).ignore_then(expr.clone()).or_not())
-            .map(|((name, ty), init)| Stmt::Var(name, ty, init));
+            .map(|((name, ty), init)| StmtKind::Var(name, ty, init));
 
         let return_stmt = just(Token::Return)
             .ignore_then(expr.clone().or_not())
-            .map(Stmt::Return);
-
-        // Old send syntax removed. Send is now an expression.
-        /*
-        let send_stmt = just(Token::Send)
-            .ignore_then(
-                ident
-                    .clone() // Actor name (identifier)
-                    .then_ignore(just(Token::Comma))
-                    .then(ident.clone()) // Handler name (identifier)
-                    .then(
-                        just(Token::Comma)
-                            .ignore_then(expr.clone().separated_by(just(Token::Comma)))
-                            .or_not()
-                            .map(|args| args.unwrap_or_default()),
-                    )
-                    .delimited_by(just(Token::LParen), just(Token::RParen)),
-            )
-            .map(|((target, message), args)| Stmt::Send {
-                target,
-                message,
-                args,
-            });
-        */
+            .map(StmtKind::Return);
 
         let if_stmt = just(Token::If)
             .ignore_then(
@@ -515,7 +590,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             )
             .then(block.clone())
             .then(just(Token::Else).ignore_then(block.clone()).or_not())
-            .map(|((cond, then_block), else_block)| Stmt::If(cond, then_block, else_block));
+            .map(|((cond, then_block), else_block)| StmtKind::If(cond, then_block, else_block));
 
         let while_stmt = just(Token::While)
             .ignore_then(
@@ -523,7 +598,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                     .delimited_by(just(Token::LParen), just(Token::RParen)),
             )
             .then(block.clone())
-            .map(|(cond, body)| Stmt::While(cond, body));
+            .map(|(cond, body)| StmtKind::While(cond, body));
 
         let for_stmt = just(Token::For)
             .ignore_then(just(Token::LParen))
@@ -542,9 +617,9 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .then(block.clone())
             .map(|(((iter, start_or_collection), end_opt), body)| {
                 if let Some(end) = end_opt {
-                    Stmt::For(iter, start_or_collection, end, body)
+                    StmtKind::For(iter, start_or_collection, end, body)
                 } else {
-                    Stmt::ForEach(iter, start_or_collection, body)
+                    StmtKind::ForEach(iter, start_or_collection, body)
                 }
             });
 
@@ -552,7 +627,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .clone()
             .then_ignore(just(Token::Equals))
             .then(expr.clone())
-            .map(|(name, value)| Stmt::Assign(name, value));
+            .map(|(name, value)| StmtKind::Assign(name, value));
 
         let assign_index_stmt = ident
             .clone()
@@ -563,7 +638,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             .then_ignore(just(Token::Equals))
             .then(expr.clone())
             .map(|((name, index), value)| {
-                Stmt::AssignIndex(name, Box::new(index), Box::new(value))
+                StmtKind::AssignIndex(name, Box::new(index), Box::new(value))
             });
 
         choice((
@@ -575,9 +650,12 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
             for_stmt,
             assign_index_stmt, // Try index assignment before variable assignment
             assign_stmt,
-            expr.clone().map(Stmt::Expr),
+            expr.clone().map(StmtKind::Expr),
         ))
-        // .then_ignore(just(Token::Semicolon).or_not()) // No semicolon token
+        .map_with_span(|kind, span: std::ops::Range<usize>| Stmt {
+            kind,
+            span: Span::new(span.start, span.end),
+        })
     });
 
     let param = ident
@@ -713,7 +791,15 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         actor_def.map(Definition::Actor),
         message_def.map(Definition::Message),
         function_def.map(Definition::Function),
-    ));
+    ))
+    .recover_with(skip_then_retry_until([
+        Token::Import,
+        Token::Data,
+        Token::Message,
+        Token::Actor,
+        Token::Fun,
+        Token::Io,
+    ]));
 
     definition
         .repeated()

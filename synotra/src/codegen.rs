@@ -144,15 +144,15 @@ impl<'a> Codegen<'a> {
     }
 
     fn gen_stmt(&mut self, stmt: &Stmt) {
-        match stmt {
-            Stmt::Let(name, _, expr) => {
+        match &stmt.kind {
+            StmtKind::Let(name, _, expr) => {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
                 self.current_block_mut()
                     .instrs
                     .push(Instruction::Assign(idx, val));
             }
-            Stmt::Var(name, ty_opt, expr_opt) => {
+            StmtKind::Var(name, ty_opt, expr_opt) => {
                 let val = if let Some(expr) = expr_opt {
                     // Has initializer - use it
                     self.gen_expr(expr)
@@ -171,14 +171,14 @@ impl<'a> Codegen<'a> {
                     .instrs
                     .push(Instruction::Assign(idx, val));
             }
-            Stmt::Assign(name, expr) => {
+            StmtKind::Assign(name, expr) => {
                 let val = self.gen_expr(expr);
                 let idx = self.get_or_alloc_local(name);
                 self.current_block_mut()
                     .instrs
                     .push(Instruction::Assign(idx, val));
             }
-            Stmt::AssignIndex(name, index, value) => {
+            StmtKind::AssignIndex(name, index, value) => {
                 let collection_idx = self.get_or_alloc_local(name);
                 let index_val = self.gen_expr(index);
                 let value_val = self.gen_expr(value);
@@ -192,15 +192,14 @@ impl<'a> Codegen<'a> {
                     value: value_idx,
                 });
             }
-            Stmt::Expr(expr) => {
+            StmtKind::Expr(expr) => {
                 self.gen_expr(expr);
             }
-            Stmt::Return(expr) => {
+            StmtKind::Return(expr) => {
                 let val = expr.as_ref().map(|e| self.gen_expr(e));
                 self.current_block_mut().terminator = Terminator::Return(val);
             }
-            // Stmt::Send removed from AST
-            Stmt::If(cond, then_block, else_block) => {
+            StmtKind::If(cond, then_block, else_block) => {
                 let cond_val = self.gen_expr(cond);
 
                 let then_idx = self.new_block_index();
@@ -247,7 +246,7 @@ impl<'a> Codegen<'a> {
                 // Merge block
                 self.switch_to_block(merge_idx);
             }
-            Stmt::While(cond, body) => {
+            StmtKind::While(cond, body) => {
                 let header_idx = self.new_block_index();
                 let body_idx = self.new_block_index();
                 let exit_idx = self.new_block_index();
@@ -271,7 +270,7 @@ impl<'a> Codegen<'a> {
                 // Exit
                 self.switch_to_block(exit_idx);
             }
-            Stmt::For(iter, start, end, body) => {
+            StmtKind::For(iter, start, end, body) => {
                 // Desugar to while loop:
                 // var iter = start
                 // while (iter < end) { ...; iter = iter + 1 }
@@ -330,7 +329,7 @@ impl<'a> Codegen<'a> {
                 // Exit
                 self.switch_to_block(exit_idx);
             }
-            Stmt::ForEach(iter, collection, body) => {
+            StmtKind::ForEach(iter, collection, body) => {
                 // 1. Evaluate collection
                 let col_val = self.gen_expr(collection);
                 let col_idx = self.value_to_local_idx(col_val);
@@ -408,22 +407,20 @@ impl<'a> Codegen<'a> {
                 // Exit
                 self.switch_to_block(exit_idx);
             }
-            _ => {}
         }
     }
-
     pub fn gen_expr(&mut self, expr: &Expr) -> Value {
-        match expr {
-            Expr::Literal(lit) => match lit {
+        match &expr.kind {
+            ExprKind::Literal(lit) => match lit {
                 Literal::Int(i) => Value::ConstInt(*i),
                 Literal::String(s) => Value::ConstString(s.clone()),
                 Literal::Bool(b) => Value::ConstInt(if *b { 1 } else { 0 }), // Bool as int
             },
-            Expr::Variable(name) => {
+            ExprKind::Variable(name) => {
                 let idx = self.get_or_alloc_local(name);
                 Value::Local(idx)
             }
-            Expr::BinaryOp(lhs, op, rhs) => {
+            ExprKind::BinaryOp(lhs, op, rhs) => {
                 let l = self.gen_expr(lhs);
                 let r = self.gen_expr(rhs);
                 let res = self.alloc_temp();
@@ -449,7 +446,7 @@ impl<'a> Codegen<'a> {
                 });
                 Value::Local(res)
             }
-            Expr::Index(target, index) => {
+            ExprKind::Index(target, index) => {
                 let target_val = self.gen_expr(target);
                 let index_val = self.gen_expr(index);
 
@@ -464,9 +461,9 @@ impl<'a> Codegen<'a> {
                 });
                 Value::Local(res)
             }
-            Expr::Call(target, method, args) => {
+            ExprKind::Call(target, method, args) => {
                 // Handle static calls for collections (e.g. List.new())
-                if let Expr::Variable(name) = &**target {
+                if let ExprKind::Variable(name) = &target.kind {
                     if name == "List" || name == "MutableMap" || name == "MutableSet" {
                         let func_name = format!("{}.{}", name, method);
                         let res = self.alloc_temp();
@@ -496,7 +493,7 @@ impl<'a> Codegen<'a> {
                 }
 
                 // Check if this is a local function call (target is a variable, not an object)
-                if let Expr::Variable(_func_name) = &**target {
+                if let ExprKind::Variable(_func_name) = &target.kind {
                     // This is a pure function call like add(5, 3)
                     let arg_vals: Vec<Value> = args.iter().map(|a| self.gen_expr(a)).collect();
                     let res = self.alloc_temp();
@@ -568,7 +565,7 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(res)
             }
-            Expr::Ask { target, message } => {
+            ExprKind::Ask { target, message } => {
                 let target_val = self.gen_expr(target);
                 let msg_val = self.gen_expr(message);
                 let result_idx = self.alloc_temp();
@@ -581,7 +578,7 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(result_idx)
             }
-            Expr::Spawn { actor_type, args } => {
+            ExprKind::Spawn { actor_type, args } => {
                 // Generate argument values
                 let arg_values: Vec<Value> = args.iter().map(|arg| self.gen_expr(arg)).collect();
 
@@ -597,7 +594,7 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(result_idx)
             }
-            Expr::Send { target, message } => {
+            ExprKind::Send { target, message } => {
                 let target_val = self.gen_expr(target);
                 let msg_val = self.gen_expr(message);
 
@@ -608,7 +605,7 @@ impl<'a> Codegen<'a> {
 
                 Value::ConstInt(0)
             }
-            Expr::FieldAccess(target, field_name) => {
+            ExprKind::FieldAccess(target, field_name) => {
                 let target_val = self.gen_expr(target);
                 let result_idx = self.get_or_alloc_local(&format!("_field_{}", field_name));
 
@@ -620,7 +617,7 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(result_idx)
             }
-            Expr::Construct {
+            ExprKind::Construct {
                 name,
                 args,
                 field_names: _,

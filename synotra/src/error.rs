@@ -1,7 +1,8 @@
 use std::fmt;
 
 /// Represents a span of text in the source code
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+
 pub struct Span {
     pub start: usize, // byte offset
     pub end: usize,

@@ -1,0 +1,7 @@
+// Simpler test with fewer errors
+
+io fun main() {
+    val x = 
+    val y = 5
+    print(y)
+}

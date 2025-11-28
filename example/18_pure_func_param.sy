@@ -1,0 +1,9 @@
+actor main(name: String) {
+    fun test(x: Int): Int {
+        return x
+    }
+    
+    io fun run() {
+        var result = test(42)
+    }
+}

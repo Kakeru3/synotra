@@ -1,0 +1,17 @@
+io fun main() {
+    val x = 10
+    val y =
+    
+    val z = 5
+    print(x
+    
+    if (true {
+        print("Error")
+    }
+}
+
+io fun broken()
+
+io fun working() {
+    print("This is OK")
+}

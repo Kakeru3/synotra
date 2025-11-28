@@ -215,18 +215,17 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
             // Check if the message type is a UserDefined type (data message name)
             match &**msg_type {
                 Type::UserDefined(name) => {
-                    // Verify it's registered as a DataMessage in symbol table
-                    if let Some(Symbol::DataMessage(_)) = symbols.lookup(name) {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "ActorRef message type '{}' is not a valid data message",
+                    // Verify it's registered as a DataMessage or Actor in symbol table
+                    match symbols.lookup(name) {
+                        Some(Symbol::DataMessage(_)) | Some(Symbol::Actor(_)) => Ok(()),
+                        _ => Err(format!(
+                            "ActorRef message type '{}' is not a valid data message or actor",
                             name
-                        ))
+                        )),
                     }
                 }
                 _ => Err(format!(
-                    "ActorRef message type must be a data message name, found: {:?}",
+                    "ActorRef message type must be a data message or actor name, found: {:?}",
                     msg_type
                 )),
             }
@@ -313,6 +312,17 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
                     }
                 }
 
+                // Enter actor scope
+                symbols.enter_scope();
+
+                // Register actor parameters
+                for param in &actor.params {
+                    symbols.insert(
+                        param.name.clone(),
+                        Symbol::Variable(param.ty.clone(), false, true), // immutable, initialized
+                    );
+                }
+
                 // Register actor members (fields and methods)
                 for member in &actor.members {
                     match member {
@@ -354,6 +364,9 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
                         }
                     }
                 }
+
+                // Exit actor scope
+                symbols.exit_scope();
             }
             _ => {}
         }
@@ -416,18 +429,19 @@ fn analyze_function(
     error_collector.to_result()
 }
 
-fn analyze_stmt(
+pub fn analyze_stmt(
     stmt: &Stmt,
     symbols: &mut SymbolTable,
     is_io_context: bool,
 ) -> Result<(), CompileError> {
-    match stmt {
-        Stmt::Let(name, ty_opt, expr) => {
+    match &stmt.kind {
+        StmtKind::Let(name, ty_opt, expr) => {
             // Check for duplicate definition in current scope
             if symbols.lookup_in_current_scope(name).is_some() {
                 return Err(CompileError::from_kind(ErrorKind::DuplicateDefinition {
                     name: name.clone(),
-                }));
+                })
+                .with_span(stmt.span));
             }
 
             let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
@@ -436,18 +450,20 @@ fn analyze_stmt(
                     return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                         expected: format!("{:?}", expected_ty),
                         found: format!("{:?}", expr_ty),
-                    }));
+                    })
+                    .with_span(expr.span));
                 }
             }
             symbols.insert(name.clone(), Symbol::Variable(expr_ty, false, true));
             // let is always initialized
         }
-        Stmt::Var(name, ty_opt, init_opt) => {
+        StmtKind::Var(name, ty_opt, init_opt) => {
             // Check for duplicate definition in current scope
             if symbols.lookup_in_current_scope(name).is_some() {
                 return Err(CompileError::from_kind(ErrorKind::DuplicateDefinition {
                     name: name.clone(),
-                }));
+                })
+                .with_span(stmt.span));
             }
 
             let var_ty = match (ty_opt, init_opt) {
@@ -458,7 +474,8 @@ fn analyze_stmt(
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: format!("{:?}", ty),
                             found: format!("{:?}", init_ty),
-                        }));
+                        })
+                        .with_span(init.span));
                     }
                     ty.clone()
                 }
@@ -473,7 +490,8 @@ fn analyze_stmt(
                             "Variable '{}' must have either a type annotation or an initializer",
                             name
                         ),
-                    }));
+                    })
+                    .with_span(stmt.span));
                 }
             };
 
@@ -481,7 +499,7 @@ fn analyze_stmt(
             let is_initialized = init_opt.is_some();
             symbols.insert(name.clone(), Symbol::Variable(var_ty, true, is_initialized));
         }
-        Stmt::Assign(name, expr) => {
+        StmtKind::Assign(name, expr) => {
             // Check variable exists and is mutable
             let (var_ty, is_mutable) = if let Some(sym) = symbols.lookup(name) {
                 match sym {
@@ -489,7 +507,8 @@ fn analyze_stmt(
                         if !*is_mutable {
                             return Err(CompileError::from_kind(ErrorKind::ImmutableAssignment {
                                 name: name.clone(),
-                            }));
+                            })
+                            .with_span(stmt.span));
                         }
                         (var_ty.clone(), *is_mutable)
                     }
@@ -499,13 +518,15 @@ fn analyze_stmt(
                                 "'{}' is not a variable and cannot be assigned to",
                                 name
                             ),
-                        }));
+                        })
+                        .with_span(stmt.span));
                     }
                 }
             } else {
                 return Err(CompileError::from_kind(ErrorKind::UndefinedVariable {
                     name: name.clone(),
-                }));
+                })
+                .with_span(stmt.span));
             };
 
             // Analyze expression after releasing the borrow
@@ -513,7 +534,7 @@ fn analyze_stmt(
             // After assignment, variable is initialized
             symbols.update(name, Symbol::Variable(var_ty, is_mutable, true));
         }
-        Stmt::AssignIndex(name, index, value) => {
+        StmtKind::AssignIndex(name, index, value) => {
             // Check variable exists and is mutable collection
             if let Some(sym) = symbols.lookup(name) {
                 match sym {
@@ -524,7 +545,8 @@ fn analyze_stmt(
                                     "Cannot assign to immutable collection '{}'",
                                     name
                                 ),
-                            }));
+                            })
+                            .with_span(stmt.span));
                         }
                         // TODO: Check if ty is a Map or List that supports assignment
                         // For now, assume it is if it's a variable
@@ -532,27 +554,28 @@ fn analyze_stmt(
                     _ => {
                         return Err(CompileError::from_kind(ErrorKind::Other {
                             message: format!("'{}' is not a variable", name),
-                        }));
+                        })
+                        .with_span(stmt.span));
                     }
                 }
             } else {
                 return Err(CompileError::from_kind(ErrorKind::UndefinedVariable {
                     name: name.clone(),
-                }));
+                })
+                .with_span(stmt.span));
             }
             analyze_expr(index, symbols, is_io_context)?;
             analyze_expr(value, symbols, is_io_context)?;
         }
-        Stmt::Expr(expr) => {
+        StmtKind::Expr(expr) => {
             analyze_expr(expr, symbols, is_io_context)?;
         }
-        Stmt::Return(expr) => {
+        StmtKind::Return(expr) => {
             if let Some(e) = expr {
                 analyze_expr(e, symbols, is_io_context)?;
             }
         }
-        // Stmt::Send removed from AST
-        Stmt::If(cond, then_block, else_block) => {
+        StmtKind::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context)?;
             // TODO: Check cond is boolean
 
@@ -585,11 +608,6 @@ fn analyze_stmt(
             };
 
             // Merge states: Variable is initialized only if initialized in BOTH branches
-            // We assume the structure of scopes (number of scopes and variables in them)
-            // remains the same because we exited the inner scopes of then/else blocks.
-            // We iterate over variables in pre_state (which covers all visible variables)
-            // and check their status in then_state and else_state.
-
             let mut merged_state = pre_state.clone();
 
             for (i, scope) in merged_state.iter_mut().enumerate() {
@@ -623,7 +641,7 @@ fn analyze_stmt(
 
             symbols.restore_initialization_snapshot(&merged_state);
         }
-        Stmt::While(cond, body) => {
+        StmtKind::While(cond, body) => {
             analyze_expr(cond, symbols, is_io_context)?;
 
             symbols.enter_scope();
@@ -632,7 +650,7 @@ fn analyze_stmt(
             }
             symbols.exit_scope();
         }
-        Stmt::For(iter, start, end, body) => {
+        StmtKind::For(iter, start, end, body) => {
             analyze_expr(start, symbols, is_io_context)?;
             analyze_expr(end, symbols, is_io_context)?;
 
@@ -644,7 +662,7 @@ fn analyze_stmt(
             }
             symbols.exit_scope();
         }
-        Stmt::ForEach(iter, collection, body) => {
+        StmtKind::ForEach(iter, collection, body) => {
             let collection_ty = analyze_expr(collection, symbols, is_io_context)?;
             let item_ty = match collection_ty {
                 Type::Generic(name, args) if name == "List" || name == "Set" => {
@@ -653,20 +671,23 @@ fn analyze_stmt(
                     } else {
                         return Err(CompileError::from_kind(ErrorKind::Other {
                             message: "Collection must have a type argument".to_string(),
-                        }));
+                        })
+                        .with_span(stmt.span));
                     }
                 }
                 Type::Generic(name, _) if name == "Map" => {
                     return Err(CompileError::from_kind(ErrorKind::Other {
                         message: "Cannot iterate over Map directly. Use map.keys() or map.values()"
                             .to_string(),
-                    }));
+                    })
+                    .with_span(stmt.span));
                 }
                 _ => {
                     return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                         expected: "Collection (List or Set)".to_string(),
                         found: format!("{:?}", collection_ty),
-                    }));
+                    })
+                    .with_span(stmt.span));
                 }
             };
 
@@ -686,53 +707,77 @@ fn analyze_expr(
     symbols: &mut SymbolTable,
     is_io_context: bool,
 ) -> Result<Type, CompileError> {
-    match expr {
-        Expr::Literal(lit) => match lit {
+    match &expr.kind {
+        ExprKind::Literal(lit) => match lit {
             Literal::Int(_) => Ok(Type::Int),
             Literal::String(_) => Ok(Type::String),
             Literal::Bool(_) => Ok(Type::Bool),
         },
-        Expr::Variable(name) => {
+        ExprKind::Variable(name) => {
             if let Some(sym) = symbols.lookup(name) {
                 match sym {
                     Symbol::Variable(ty, _, is_initialized) => {
                         if !is_initialized {
                             return Err(CompileError::from_kind(
                                 ErrorKind::UninitializedVariable { name: name.clone() },
-                            ));
+                            )
+                            .with_span(expr.span));
                         }
                         Ok(ty.clone())
                     }
                     _ => Err(CompileError::from_kind(ErrorKind::Other {
                         message: format!("'{}' is not a variable", name),
-                    })),
+                    })
+                    .with_span(expr.span)),
                 }
             } else {
+                println!("DEBUG: UndefinedVariable: {}", name);
                 let mut err =
-                    CompileError::from_kind(ErrorKind::UndefinedVariable { name: name.clone() });
+                    CompileError::from_kind(ErrorKind::UndefinedVariable { name: name.clone() })
+                        .with_span(expr.span);
                 if let Some(suggestion) = find_suggestion(name, symbols) {
                     err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
                 }
                 Err(err)
             }
         }
-        Expr::BinaryOp(lhs, op, rhs) => {
+        ExprKind::BinaryOp(lhs, op, rhs) => {
             let lhs_ty = analyze_expr(lhs, symbols, is_io_context)?;
             let rhs_ty = analyze_expr(rhs, symbols, is_io_context)?;
 
             match op {
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                BinaryOp::Add => {
+                    if check_type_compatibility(&Type::Int, &lhs_ty)
+                        && check_type_compatibility(&Type::Int, &rhs_ty)
+                    {
+                        Ok(Type::Int)
+                    } else if check_type_compatibility(&Type::String, &lhs_ty)
+                        || check_type_compatibility(&Type::String, &rhs_ty)
+                    {
+                        // If either operand is a String, the result is a String (concatenation)
+                        Ok(Type::String)
+                    } else {
+                        return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                            expected: "Int or String".to_string(),
+                            found: format!("{:?} + {:?}", lhs_ty, rhs_ty),
+                        })
+                        .with_span(expr.span));
+                    }
+                }
+                BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                     if !check_type_compatibility(&Type::Int, &lhs_ty) {
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: "Int".to_string(),
                             found: format!("{:?}", lhs_ty),
-                        }));
+                        })
+                        .with_span(lhs.span));
                     }
                     if !check_type_compatibility(&Type::Int, &rhs_ty) {
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: "Int".to_string(),
                             found: format!("{:?}", rhs_ty),
-                        }));
+                        })
+                        .with_span(rhs.span));
                     }
                     Ok(Type::Int)
                 }
@@ -741,7 +786,8 @@ fn analyze_expr(
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: format!("{:?}", lhs_ty),
                             found: format!("{:?}", rhs_ty),
-                        }));
+                        })
+                        .with_span(expr.span));
                     }
                     Ok(Type::Bool)
                 }
@@ -750,19 +796,21 @@ fn analyze_expr(
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: "Int".to_string(),
                             found: format!("{:?}", lhs_ty),
-                        }));
+                        })
+                        .with_span(lhs.span));
                     }
                     if !check_type_compatibility(&Type::Int, &rhs_ty) {
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: "Int".to_string(),
                             found: format!("{:?}", rhs_ty),
-                        }));
+                        })
+                        .with_span(rhs.span));
                     }
                     Ok(Type::Bool)
                 }
             }
         }
-        Expr::Index(target, index) => {
+        ExprKind::Index(target, index) => {
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
             analyze_expr(index, symbols, is_io_context)?;
 
@@ -782,13 +830,13 @@ fn analyze_expr(
                 _ => Ok(Type::Int), // Fallback
             }
         }
-        Expr::Call(target, method, args) => {
+        ExprKind::Call(target, method, args) => {
             for arg in args {
                 analyze_expr(arg, symbols, is_io_context)?;
             }
 
             // Check if it's a method call on a variable
-            if let Expr::Variable(var_name) = target.as_ref() {
+            if let ExprKind::Variable(var_name) = &target.kind {
                 if let Some(Symbol::Variable(ty, _, _)) = symbols.lookup(var_name) {
                     // eprintln!(
                     //     "DEBUG: Method call '{}' on variable '{}' with type {:?}",
@@ -797,7 +845,7 @@ fn analyze_expr(
                 }
             }
 
-            if let Expr::Variable(name) = target.as_ref() {
+            if let ExprKind::Variable(name) = &target.kind {
                 if method == "new" {
                     if name == "List" {
                         return Ok(Type::Generic("List".to_string(), vec![Type::Unknown]));
@@ -814,7 +862,7 @@ fn analyze_expr(
 
             // Special case: parser generates Call(Variable("self"), method_name, args) for global functions
             // like println(...). In this case, we don't actually have a 'self' variable.
-            let is_global_function = if let Expr::Variable(name) = target.as_ref() {
+            let is_global_function = if let ExprKind::Variable(name) = &target.kind {
                 name == "self"
             } else {
                 false
@@ -829,7 +877,8 @@ fn analyze_expr(
                     if symbols.lookup(method).is_none() {
                         let mut err = CompileError::from_kind(ErrorKind::UnknownFunction {
                             name: method.clone(),
-                        });
+                        })
+                        .with_span(expr.span);
                         if let Some(suggestion) = find_suggestion(method, symbols) {
                             err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
                         }
@@ -855,7 +904,7 @@ fn analyze_expr(
                                 if let Type::Unknown = type_args[0] {
                                     if let Some(arg) = args.first() {
                                         let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                        if let Expr::Variable(var_name) = target.as_ref() {
+                                        if let ExprKind::Variable(var_name) = &target.kind {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
                                             symbols.update(
@@ -926,7 +975,7 @@ fn analyze_expr(
                                 }
 
                                 if changed {
-                                    if let Expr::Variable(var_name) = target.as_ref() {
+                                    if let ExprKind::Variable(var_name) = &target.kind {
                                         let new_ty = Type::Generic(name.clone(), new_args);
                                         symbols
                                             .update(var_name, Symbol::Variable(new_ty, true, true));
@@ -949,7 +998,7 @@ fn analyze_expr(
                                 if let Type::Unknown = type_args[0] {
                                     if let Some(arg) = args.first() {
                                         let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
-                                        if let Expr::Variable(var_name) = target.as_ref() {
+                                        if let ExprKind::Variable(var_name) = &target.kind {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
                                             symbols.update(
@@ -1004,7 +1053,8 @@ fn analyze_expr(
                             "Cannot call IO function '{}' from non-IO context",
                             method_name
                         ),
-                    }));
+                    })
+                    .with_span(expr.span));
                 }
                 return Ok(Type::Int); // Return type doesn't matter much for now
             }
@@ -1019,23 +1069,25 @@ fn analyze_expr(
                             "Cannot call IO function '{}' from non-IO context",
                             method_name
                         ),
-                    }));
+                    })
+                    .with_span(expr.span));
                 }
             }
 
             Ok(Type::Int)
         }
-        Expr::Ask { target, message } => {
+        ExprKind::Ask { target, message } => {
             // Check: ask() can only be used in IO context
             if !is_io_context {
                 return Err(CompileError::from_kind(ErrorKind::IOError {
                     message: "Cannot use 'ask' in a pure function. Use 'io fun' instead."
                         .to_string(),
-                }));
+                })
+                .with_span(expr.span));
             }
 
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
-            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+            let _msg_ty = analyze_expr(message, symbols, is_io_context)?;
 
             if let Type::ActorRef(_) = target_ty {
                 // Relaxed check: allow any message type for now
@@ -1043,22 +1095,24 @@ fn analyze_expr(
                 return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                     expected: "ActorRef".to_string(),
                     found: format!("{:?}", target_ty),
-                }));
+                })
+                .with_span(target.span));
             }
 
             Ok(Type::Unknown) // ask returns a value (placeholder)
         }
-        Expr::Send { target, message } => {
+        ExprKind::Send { target, message } => {
             // Check: send() can only be used in IO context
             if !is_io_context {
                 return Err(CompileError::from_kind(ErrorKind::IOError {
                     message: "Cannot use 'send' in a pure function. Use 'io fun' instead."
                         .to_string(),
-                }));
+                })
+                .with_span(expr.span));
             }
 
             let target_ty = analyze_expr(target, symbols, is_io_context)?;
-            let msg_ty = analyze_expr(message, symbols, is_io_context)?;
+            let _msg_ty = analyze_expr(message, symbols, is_io_context)?;
 
             if let Type::ActorRef(_) = target_ty {
                 // Relaxed check: allow any message type for now
@@ -1066,12 +1120,13 @@ fn analyze_expr(
                 return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                     expected: "ActorRef".to_string(),
                     found: format!("{:?}", target_ty),
-                }));
+                })
+                .with_span(target.span));
             }
 
             Ok(Type::Unit) // send returns Unit/Int (0)
         }
-        Expr::Construct {
+        ExprKind::Construct {
             name,
             args,
             field_names: _,
@@ -1087,7 +1142,8 @@ fn analyze_expr(
                         return Err(CompileError::from_kind(ErrorKind::ArgumentCountMismatch {
                             expected: fields.len(),
                             found: args.len(),
-                        }));
+                        })
+                        .with_span(expr.span));
                     }
 
                     // Analyze and type-check each argument
@@ -1097,10 +1153,14 @@ fn analyze_expr(
                             Ok(arg_type) => {
                                 let expected_type = &fields[i].1;
                                 if !check_type_compatibility(&arg_type, expected_type) {
-                                    errors.push(CompileError::from_kind(ErrorKind::TypeMismatch {
-                                        expected: format!("{:?}", expected_type),
-                                        found: format!("{:?}", arg_type),
-                                    }));
+                                    println!("DEBUG: TypeMismatch in Construct. Expected: {:?}, Found: {:?}", expected_type, arg_type);
+                                    errors.push(
+                                        CompileError::from_kind(ErrorKind::TypeMismatch {
+                                            expected: format!("{:?}", expected_type),
+                                            found: format!("{:?}", arg_type),
+                                        })
+                                        .with_span(arg.span),
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -1120,11 +1180,13 @@ fn analyze_expr(
                 }
                 Some(_) => Err(CompileError::from_kind(ErrorKind::Other {
                     message: format!("'{}' is not a data message", name),
-                })),
+                })
+                .with_span(expr.span)),
                 None => {
                     let mut err = CompileError::from_kind(ErrorKind::Other {
                         message: format!("Undefined data message '{}'", name),
-                    });
+                    })
+                    .with_span(expr.span);
                     if let Some(suggestion) = find_suggestion(name, symbols) {
                         err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
                     }
@@ -1132,7 +1194,7 @@ fn analyze_expr(
                 }
             }
         }
-        Expr::Spawn { actor_type, args } => {
+        ExprKind::Spawn { actor_type, args } => {
             // Validate that actor_type is a registered actor
             match symbols.lookup(actor_type) {
                 Some(Symbol::Actor(_)) => {
@@ -1148,7 +1210,8 @@ fn analyze_expr(
                 _ => {
                     let mut err = CompileError::from_kind(ErrorKind::Other {
                         message: format!("Unknown actor type: {}", actor_type),
-                    });
+                    })
+                    .with_span(expr.span);
                     if let Some(suggestion) = find_suggestion(actor_type, symbols) {
                         err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
                     }
@@ -1156,8 +1219,8 @@ fn analyze_expr(
                 }
             }
         }
-        Expr::FieldAccess(expr, field) => {
-            let target_ty = analyze_expr(expr, symbols, is_io_context)?;
+        ExprKind::FieldAccess(expr_inner, field) => {
+            let target_ty = analyze_expr(expr_inner, symbols, is_io_context)?;
             match target_ty {
                 Type::UserDefined(type_name) => {
                     // Look up the type definition to find fields
@@ -1170,16 +1233,19 @@ fn analyze_expr(
                         Err(CompileError::from_kind(ErrorKind::UnknownField {
                             field: field.clone(),
                             ty: type_name,
-                        }))
+                        })
+                        .with_span(expr.span))
                     } else {
                         Err(CompileError::from_kind(ErrorKind::Other {
                             message: format!("Type '{}' does not have fields", type_name),
-                        }))
+                        })
+                        .with_span(expr.span))
                     }
                 }
                 _ => Err(CompileError::from_kind(ErrorKind::Other {
                     message: format!("Cannot access field '{}' on type {:?}", field, target_ty),
-                })),
+                })
+                .with_span(expr.span)),
             }
         }
     }

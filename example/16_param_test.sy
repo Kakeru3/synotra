@@ -1,0 +1,9 @@
+// Simple test for parameter parsing
+
+io fun test(x: Int) {
+    print(x)
+}
+
+io fun main() {
+    test(42)
+}

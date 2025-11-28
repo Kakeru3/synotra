@@ -114,7 +114,13 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtKind {
     Let(String, Option<Type>, Expr),
     Var(String, Option<Type>, Option<Expr>), // var name: Type = init (init is optional)
     Assign(String, Expr),                    // variable reassignment
@@ -129,7 +135,13 @@ pub enum Stmt {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprKind {
     Literal(Literal),
     Variable(String),
     Call(Box<Expr>, String, Vec<Expr>), // target.method(args) or func(args)
