@@ -30,6 +30,9 @@ pub enum ErrorKind {
     UnknownMethod { method: String, ty: String },
     IOError { message: String },
     Other { message: String },
+    // Warnings
+    UnusedVariable { name: String },
+    UnusedFunction { name: String },
 }
 
 impl ErrorKind {
@@ -72,6 +75,12 @@ impl ErrorKind {
             }
             ErrorKind::IOError { message } => message.clone(),
             ErrorKind::Other { message } => message.clone(),
+            ErrorKind::UnusedVariable { name } => {
+                format!("Unused variable '{}'", name)
+            }
+            ErrorKind::UnusedFunction { name } => {
+                format!("Unused function '{}'", name)
+            }
         }
     }
 
@@ -122,6 +131,14 @@ impl ErrorKind {
             )),
             ErrorKind::IOError { .. } => None,
             ErrorKind::Other { .. } => None,
+            ErrorKind::UnusedVariable { name } => Some(format!(
+                "The variable '{}' is declared but never used",
+                name
+            )),
+            ErrorKind::UnusedFunction { name } => Some(format!(
+                "The function '{}' is defined but never called",
+                name
+            )),
         }
     }
 
@@ -164,6 +181,13 @@ impl ErrorKind {
             }
             ErrorKind::IOError { .. } => None,
             ErrorKind::Other { .. } => None,
+            ErrorKind::UnusedVariable { .. } => Some(
+                "Remove the variable or prefix it with an underscore '_' to suppress this warning"
+                    .to_string(),
+            ),
+            ErrorKind::UnusedFunction { .. } => {
+                Some("Remove the function or call it if it's needed".to_string())
+            }
         }
     }
 }
@@ -211,6 +235,18 @@ impl CompileError {
     pub fn from_kind(kind: ErrorKind) -> Self {
         CompileError {
             level: ErrorLevel::Error,
+            title: kind.title(),
+            span: None,
+            explanation: kind.explanation(),
+            suggestion: kind.suggestion(),
+            kind: Some(kind),
+        }
+    }
+
+    /// Create a warning from an ErrorKind
+    pub fn warning(kind: ErrorKind) -> Self {
+        CompileError {
+            level: ErrorLevel::Warning,
             title: kind.title(),
             span: None,
             explanation: kind.explanation(),

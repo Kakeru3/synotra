@@ -1,0 +1,6 @@
+// Test file for unused variable warning
+io fun main() {
+    val unused_var = 42
+    val used_var = 10
+    println(used_var)
+}

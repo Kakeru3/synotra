@@ -1,0 +1,4 @@
+// Very simple test
+io fun main() {
+    val unused = 42
+}

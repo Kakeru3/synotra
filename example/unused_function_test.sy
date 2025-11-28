@@ -1,0 +1,13 @@
+// Test unused function detection
+fun helper(): Int {
+    return 42
+}
+
+fun used_helper(): Int {
+    return 100
+}
+
+io fun main() {
+    val x = used_helper()
+    println(x)
+}

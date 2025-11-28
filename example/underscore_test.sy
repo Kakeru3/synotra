@@ -1,0 +1,5 @@
+// Test underscore prefix
+io fun main() {
+    val _intentionally_unused = 42
+    val actually_unused = 123
+}

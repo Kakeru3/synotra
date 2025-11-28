@@ -2,23 +2,43 @@ use crate::ast::*;
 use crate::error::{CompileError, ErrorKind};
 use std::collections::HashMap;
 
-/// Collects errors during semantic analysis
+/// Collects errors and warnings during semantic analysis
 #[derive(Debug, Clone)]
 pub struct ErrorCollector {
     pub errors: Vec<CompileError>,
+    pub warnings: Vec<CompileError>,
 }
 
 impl ErrorCollector {
     pub fn new() -> Self {
-        ErrorCollector { errors: Vec::new() }
+        ErrorCollector {
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, error: CompileError) {
+        use crate::error::ErrorLevel;
+        match error.level {
+            ErrorLevel::Error => self.errors.push(error),
+            ErrorLevel::Warning => self.warnings.push(error),
+        }
+    }
+
+    pub fn push_error(&mut self, error: CompileError) {
         self.errors.push(error);
+    }
+
+    pub fn push_warning(&mut self, warning: CompileError) {
+        self.warnings.push(warning);
     }
 
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
+    }
+
+    pub fn has_warnings(&self) -> bool {
+        !self.warnings.is_empty()
     }
 
     pub fn to_result(&self) -> Result<(), Vec<CompileError>> {
@@ -27,6 +47,12 @@ impl ErrorCollector {
         } else {
             Ok(())
         }
+    }
+
+    pub fn all_messages(&self) -> Vec<CompileError> {
+        let mut all = self.errors.clone();
+        all.extend(self.warnings.clone());
+        all
     }
 }
 
@@ -129,6 +155,96 @@ impl SymbolTable {
                 }
             }
         }
+    }
+
+    pub fn set_initialization(&mut self, init_snapshot: Vec<Vec<(String, bool)>>) {
+        for (scope, snapshot) in self.scopes.iter_mut().zip(init_snapshot.iter()) {
+            for (name, is_init) in snapshot {
+                if let Some(Symbol::Variable(ty, is_mut, _)) = scope.get(name) {
+                    scope.insert(
+                        name.clone(),
+                        Symbol::Variable(ty.clone(), *is_mut, *is_init),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Tracks usage of variables and functions for warning generation
+#[derive(Debug, Clone)]
+pub struct UsageTracker {
+    /// Maps variable names to their definition spans
+    variable_definitions: HashMap<String, crate::error::Span>,
+    /// Set of variables that have been used
+    variable_usages: std::collections::HashSet<String>,
+    /// Maps function names to (span, is_io)
+    function_definitions: HashMap<String, (crate::error::Span, bool)>,
+    /// Set of functions that have been called
+    function_calls: std::collections::HashSet<String>,
+}
+
+impl UsageTracker {
+    pub fn new() -> Self {
+        UsageTracker {
+            variable_definitions: HashMap::new(),
+            variable_usages: std::collections::HashSet::new(),
+            function_definitions: HashMap::new(),
+            function_calls: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Track a variable definition
+    pub fn define_variable(&mut self, name: String, span: crate::error::Span) {
+        // Skip underscore-prefixed variables (convention for intentionally unused)
+        if !name.starts_with('_') {
+            self.variable_definitions.insert(name, span);
+        }
+    }
+
+    /// Track a variable usage
+    pub fn use_variable(&mut self, name: &str) {
+        self.variable_usages.insert(name.to_string());
+    }
+
+    /// Track a function definition
+    pub fn define_function(&mut self, name: String, span: crate::error::Span, is_io: bool) {
+        // Skip main and IO handlers
+        if name != "main" && name != "run" {
+            self.function_definitions.insert(name, (span, is_io));
+        }
+    }
+
+    /// Track a function call
+    pub fn call_function(&mut self, name: &str) {
+        self.function_calls.insert(name.to_string());
+    }
+
+    /// Generate warnings for unused variables and functions
+    pub fn generate_warnings(&self) -> Vec<CompileError> {
+        let mut warnings = Vec::new();
+
+        // Check for unused variables
+        for (name, span) in &self.variable_definitions {
+            if !self.variable_usages.contains(name) {
+                warnings.push(
+                    CompileError::warning(ErrorKind::UnusedVariable { name: name.clone() })
+                        .with_span(*span),
+                );
+            }
+        }
+
+        // Check for unused pure functions (not IO functions)
+        for (name, (span, is_io)) in &self.function_definitions {
+            if !is_io && !self.function_calls.contains(name) {
+                warnings.push(
+                    CompileError::warning(ErrorKind::UnusedFunction { name: name.clone() })
+                        .with_span(*span),
+                );
+            }
+        }
+
+        warnings
     }
 }
 
@@ -244,6 +360,7 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
 pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
     let mut symbols = SymbolTable::new();
     let mut error_collector = ErrorCollector::new();
+    let mut tracker = UsageTracker::new();
 
     // 1. Register top-level definitions
     // First pass: Register all data messages
@@ -282,6 +399,11 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
                     func.name.clone(),
                     Symbol::Function(param_types, func.return_type.clone(), func.is_io),
                 );
+
+                // Track function definition
+                // TODO: Add spans to FunctionDef in the future
+                let dummy_span = crate::error::Span::new(0, 0);
+                tracker.define_function(func.name.clone(), dummy_span, func.is_io);
             }
             Definition::Import(_import) => {
                 // TODO: Register imported types in symbol table
@@ -295,7 +417,7 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
     for def in &program.definitions {
         match def {
             Definition::Function(func) => {
-                if let Err(errors) = analyze_function(func, &mut symbols) {
+                if let Err(errors) = analyze_function(func, &mut symbols, &mut tracker) {
                     for err in errors {
                         error_collector.push(err);
                     }
@@ -351,12 +473,16 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
                     match member {
                         ActorMember::Field(field) => {
                             // Analyze the initialization expression
-                            if let Err(e) = analyze_expr(&field.init, &mut symbols, false) {
+                            if let Err(e) =
+                                analyze_expr(&field.init, &mut symbols, false, &mut tracker)
+                            {
                                 error_collector.push(e);
                             }
                         }
                         ActorMember::Method(method) => {
-                            if let Err(errors) = analyze_function(method, &mut symbols) {
+                            if let Err(errors) =
+                                analyze_function(method, &mut symbols, &mut tracker)
+                            {
                                 for err in errors {
                                     error_collector.push(err);
                                 }
@@ -372,6 +498,24 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
         }
     }
 
+    // Generate warnings from usage tracker
+    let warnings = tracker.generate_warnings();
+    for warning in &warnings {
+        error_collector.push(warning.clone());
+    }
+
+    // Temporarily print warnings to stderr for testing
+    if !warnings.is_empty() {
+        eprintln!("\n=== WARNINGS ===");
+        for warn in &warnings {
+            eprintln!("[WARNING] {}", warn.title);
+            if let Some(span) = warn.span {
+                eprintln!("  at line {}, column {}", span.start, span.end);
+            }
+        }
+        eprintln!("================\n");
+    }
+
     if error_collector.has_errors() {
         error_collector.to_result().map(|_| symbols)
     } else {
@@ -382,6 +526,7 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
 fn analyze_function(
     func: &FunctionDef,
     symbols: &mut SymbolTable,
+    tracker: &mut UsageTracker,
 ) -> Result<(), Vec<CompileError>> {
     let mut error_collector = ErrorCollector::new();
 
@@ -418,7 +563,7 @@ fn analyze_function(
     // Collect errors from all statements
     let mut error_collector = ErrorCollector::new();
     for stmt in &func.body.stmts {
-        if let Err(e) = analyze_stmt(stmt, symbols, func.is_io) {
+        if let Err(e) = analyze_stmt(stmt, symbols, func.is_io, tracker) {
             error_collector.push(e);
         }
     }
@@ -433,6 +578,7 @@ pub fn analyze_stmt(
     stmt: &Stmt,
     symbols: &mut SymbolTable,
     is_io_context: bool,
+    tracker: &mut UsageTracker,
 ) -> Result<(), CompileError> {
     match &stmt.kind {
         StmtKind::Let(name, ty_opt, expr) => {
@@ -444,7 +590,7 @@ pub fn analyze_stmt(
                 .with_span(stmt.span));
             }
 
-            let expr_ty = analyze_expr(expr, symbols, is_io_context)?;
+            let expr_ty = analyze_expr(expr, symbols, is_io_context, tracker)?;
             if let Some(expected_ty) = ty_opt {
                 if !check_type_compatibility(expected_ty, &expr_ty) {
                     return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
@@ -455,6 +601,8 @@ pub fn analyze_stmt(
                 }
             }
             symbols.insert(name.clone(), Symbol::Variable(expr_ty, false, true));
+            // Track variable definition
+            tracker.define_variable(name.clone(), stmt.span);
             // let is always initialized
         }
         StmtKind::Var(name, ty_opt, init_opt) => {
@@ -469,7 +617,7 @@ pub fn analyze_stmt(
             let var_ty = match (ty_opt, init_opt) {
                 // Case 1: Both type and initializer
                 (Some(ty), Some(init)) => {
-                    let init_ty = analyze_expr(init, symbols, is_io_context)?;
+                    let init_ty = analyze_expr(init, symbols, is_io_context, tracker)?;
                     if !check_type_compatibility(ty, &init_ty) {
                         return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                             expected: format!("{:?}", ty),
@@ -480,7 +628,7 @@ pub fn analyze_stmt(
                     ty.clone()
                 }
                 // Case 2: Only initializer (type inference)
-                (None, Some(init)) => analyze_expr(init, symbols, is_io_context)?,
+                (None, Some(init)) => analyze_expr(init, symbols, is_io_context, tracker)?,
                 // Case 3: Only type annotation (no initializer) - this is valid
                 (Some(ty), None) => ty.clone(),
                 // Case 4: Neither type nor initializer - ERROR
@@ -498,6 +646,8 @@ pub fn analyze_stmt(
             // Var is initialized if init_opt.is_some()
             let is_initialized = init_opt.is_some();
             symbols.insert(name.clone(), Symbol::Variable(var_ty, true, is_initialized));
+            // Track variable definition
+            tracker.define_variable(name.clone(), stmt.span);
         }
         StmtKind::Assign(name, expr) => {
             // Check variable exists and is mutable
@@ -530,7 +680,7 @@ pub fn analyze_stmt(
             };
 
             // Analyze expression after releasing the borrow
-            analyze_expr(expr, symbols, is_io_context)?;
+            analyze_expr(expr, symbols, is_io_context, tracker)?;
             // After assignment, variable is initialized
             symbols.update(name, Symbol::Variable(var_ty, is_mutable, true));
         }
@@ -564,19 +714,19 @@ pub fn analyze_stmt(
                 })
                 .with_span(stmt.span));
             }
-            analyze_expr(index, symbols, is_io_context)?;
-            analyze_expr(value, symbols, is_io_context)?;
+            analyze_expr(index, symbols, is_io_context, tracker)?;
+            analyze_expr(value, symbols, is_io_context, tracker)?;
         }
         StmtKind::Expr(expr) => {
-            analyze_expr(expr, symbols, is_io_context)?;
+            analyze_expr(expr, symbols, is_io_context, tracker)?;
         }
         StmtKind::Return(expr) => {
             if let Some(e) = expr {
-                analyze_expr(e, symbols, is_io_context)?;
+                analyze_expr(e, symbols, is_io_context, tracker)?;
             }
         }
         StmtKind::If(cond, then_block, else_block) => {
-            analyze_expr(cond, symbols, is_io_context)?;
+            analyze_expr(cond, symbols, is_io_context, tracker)?;
             // TODO: Check cond is boolean
 
             // Snapshot initialization state before branching
@@ -585,7 +735,7 @@ pub fn analyze_stmt(
             // Analyze 'then' block
             symbols.enter_scope();
             for s in &then_block.stmts {
-                analyze_stmt(s, symbols, is_io_context)?;
+                analyze_stmt(s, symbols, is_io_context, tracker)?;
             }
             symbols.exit_scope();
 
@@ -599,7 +749,7 @@ pub fn analyze_stmt(
             let else_state = if let Some(else_block) = else_block {
                 symbols.enter_scope();
                 for s in &else_block.stmts {
-                    analyze_stmt(s, symbols, is_io_context)?;
+                    analyze_stmt(s, symbols, is_io_context, tracker)?;
                 }
                 symbols.exit_scope();
                 symbols.get_initialization_snapshot()
@@ -642,28 +792,28 @@ pub fn analyze_stmt(
             symbols.restore_initialization_snapshot(&merged_state);
         }
         StmtKind::While(cond, body) => {
-            analyze_expr(cond, symbols, is_io_context)?;
+            analyze_expr(cond, symbols, is_io_context, tracker)?;
 
             symbols.enter_scope();
             for s in &body.stmts {
-                analyze_stmt(s, symbols, is_io_context)?;
+                analyze_stmt(s, symbols, is_io_context, tracker)?;
             }
             symbols.exit_scope();
         }
         StmtKind::For(iter, start, end, body) => {
-            analyze_expr(start, symbols, is_io_context)?;
-            analyze_expr(end, symbols, is_io_context)?;
+            analyze_expr(start, symbols, is_io_context, tracker)?;
+            analyze_expr(end, symbols, is_io_context, tracker)?;
 
             symbols.enter_scope();
             symbols.insert(iter.clone(), Symbol::Variable(Type::Int, false, true)); // Iterator is immutable int, initialized
 
             for s in &body.stmts {
-                analyze_stmt(s, symbols, is_io_context)?;
+                analyze_stmt(s, symbols, is_io_context, tracker)?;
             }
             symbols.exit_scope();
         }
         StmtKind::ForEach(iter, collection, body) => {
-            let collection_ty = analyze_expr(collection, symbols, is_io_context)?;
+            let collection_ty = analyze_expr(collection, symbols, is_io_context, tracker)?;
             let item_ty = match collection_ty {
                 Type::Generic(name, args) if name == "List" || name == "Set" => {
                     if !args.is_empty() {
@@ -694,7 +844,7 @@ pub fn analyze_stmt(
             symbols.enter_scope();
             symbols.insert(iter.clone(), Symbol::Variable(item_ty, false, true)); // initialized
             for s in &body.stmts {
-                analyze_stmt(s, symbols, is_io_context)?;
+                analyze_stmt(s, symbols, is_io_context, tracker)?;
             }
             symbols.exit_scope();
         }
@@ -706,6 +856,7 @@ fn analyze_expr(
     expr: &Expr,
     symbols: &mut SymbolTable,
     is_io_context: bool,
+    tracker: &mut UsageTracker,
 ) -> Result<Type, CompileError> {
     match &expr.kind {
         ExprKind::Literal(lit) => match lit {
@@ -723,6 +874,8 @@ fn analyze_expr(
                             )
                             .with_span(expr.span));
                         }
+                        // Track variable usage
+                        tracker.use_variable(name);
                         Ok(ty.clone())
                     }
                     _ => Err(CompileError::from_kind(ErrorKind::Other {
@@ -742,8 +895,8 @@ fn analyze_expr(
             }
         }
         ExprKind::BinaryOp(lhs, op, rhs) => {
-            let lhs_ty = analyze_expr(lhs, symbols, is_io_context)?;
-            let rhs_ty = analyze_expr(rhs, symbols, is_io_context)?;
+            let lhs_ty = analyze_expr(lhs, symbols, is_io_context, tracker)?;
+            let rhs_ty = analyze_expr(rhs, symbols, is_io_context, tracker)?;
 
             match op {
                 BinaryOp::Add => {
@@ -811,8 +964,8 @@ fn analyze_expr(
             }
         }
         ExprKind::Index(target, index) => {
-            let target_ty = analyze_expr(target, symbols, is_io_context)?;
-            analyze_expr(index, symbols, is_io_context)?;
+            let target_ty = analyze_expr(target, symbols, is_io_context, tracker)?;
+            analyze_expr(index, symbols, is_io_context, tracker)?;
 
             // TODO: Check if target_ty is a collection and return element type
             // For now, if it's a Generic, assume it returns the first type arg (e.g. List<T> -> T)
@@ -831,8 +984,11 @@ fn analyze_expr(
             }
         }
         ExprKind::Call(target, method, args) => {
+            // Track function call
+            tracker.call_function(method);
+
             for arg in args {
-                analyze_expr(arg, symbols, is_io_context)?;
+                analyze_expr(arg, symbols, is_io_context, tracker)?;
             }
 
             // Check if it's a method call on a variable
@@ -887,7 +1043,7 @@ fn analyze_expr(
                 }
                 Type::Unknown // Placeholder, won't be used
             } else {
-                analyze_expr(target, symbols, is_io_context)?
+                analyze_expr(target, symbols, is_io_context, tracker)?
             };
 
             // Collection method inference
@@ -903,7 +1059,8 @@ fn analyze_expr(
                             if !type_args.is_empty() {
                                 if let Type::Unknown = type_args[0] {
                                     if let Some(arg) = args.first() {
-                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                        let arg_ty =
+                                            analyze_expr(arg, symbols, is_io_context, tracker)?;
                                         if let ExprKind::Variable(var_name) = &target.kind {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
@@ -963,13 +1120,15 @@ fn analyze_expr(
 
                                 if let Type::Unknown = type_args[0] {
                                     if let Some(arg) = args.first() {
-                                        new_args[0] = analyze_expr(arg, symbols, is_io_context)?;
+                                        new_args[0] =
+                                            analyze_expr(arg, symbols, is_io_context, tracker)?;
                                         changed = true;
                                     }
                                 }
                                 if let Type::Unknown = type_args[1] {
                                     if let Some(arg) = args.get(1) {
-                                        new_args[1] = analyze_expr(arg, symbols, is_io_context)?;
+                                        new_args[1] =
+                                            analyze_expr(arg, symbols, is_io_context, tracker)?;
                                         changed = true;
                                     }
                                 }
@@ -997,7 +1156,8 @@ fn analyze_expr(
                             if !type_args.is_empty() {
                                 if let Type::Unknown = type_args[0] {
                                     if let Some(arg) = args.first() {
-                                        let arg_ty = analyze_expr(arg, symbols, is_io_context)?;
+                                        let arg_ty =
+                                            analyze_expr(arg, symbols, is_io_context, tracker)?;
                                         if let ExprKind::Variable(var_name) = &target.kind {
                                             let new_ty =
                                                 Type::Generic(name.clone(), vec![arg_ty.clone()]);
@@ -1086,8 +1246,8 @@ fn analyze_expr(
                 .with_span(expr.span));
             }
 
-            let target_ty = analyze_expr(target, symbols, is_io_context)?;
-            let _msg_ty = analyze_expr(message, symbols, is_io_context)?;
+            let target_ty = analyze_expr(target, symbols, is_io_context, tracker)?;
+            let _msg_ty = analyze_expr(message, symbols, is_io_context, tracker)?;
 
             if let Type::ActorRef(_) = target_ty {
                 // Relaxed check: allow any message type for now
@@ -1111,8 +1271,8 @@ fn analyze_expr(
                 .with_span(expr.span));
             }
 
-            let target_ty = analyze_expr(target, symbols, is_io_context)?;
-            let _msg_ty = analyze_expr(message, symbols, is_io_context)?;
+            let target_ty = analyze_expr(target, symbols, is_io_context, tracker)?;
+            let _msg_ty = analyze_expr(message, symbols, is_io_context, tracker)?;
 
             if let Type::ActorRef(_) = target_ty {
                 // Relaxed check: allow any message type for now
@@ -1149,7 +1309,7 @@ fn analyze_expr(
                     // Analyze and type-check each argument
                     let mut errors = Vec::new();
                     for (i, arg) in args.iter().enumerate() {
-                        match analyze_expr(arg, symbols, is_io_context) {
+                        match analyze_expr(arg, symbols, is_io_context, tracker) {
                             Ok(arg_type) => {
                                 let expected_type = &fields[i].1;
                                 if !check_type_compatibility(&arg_type, expected_type) {
@@ -1200,7 +1360,7 @@ fn analyze_expr(
                 Some(Symbol::Actor(_)) => {
                     // Validate args
                     for arg in args {
-                        analyze_expr(arg, symbols, is_io_context)?;
+                        analyze_expr(arg, symbols, is_io_context, tracker)?;
                     }
                     // Return ActorRef<actor_type>
                     Ok(Type::ActorRef(Box::new(Type::UserDefined(
@@ -1220,7 +1380,7 @@ fn analyze_expr(
             }
         }
         ExprKind::FieldAccess(expr_inner, field) => {
-            let target_ty = analyze_expr(expr_inner, symbols, is_io_context)?;
+            let target_ty = analyze_expr(expr_inner, symbols, is_io_context, tracker)?;
             match target_ty {
                 Type::UserDefined(type_name) => {
                     // Look up the type definition to find fields

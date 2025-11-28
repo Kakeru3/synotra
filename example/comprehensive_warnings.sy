@@ -1,0 +1,16 @@
+// Comprehensive warning test
+fun unused_function(): Int {
+    return 42
+}
+
+fun used_function(): Int {
+    return 100
+}
+
+io fun main() {
+    val unused_var = 10
+    val used_var = used_function()
+    val _deliberately_unused = 999
+    
+    println(used_var)
+}
