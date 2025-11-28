@@ -357,7 +357,7 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
     }
 }
 
-pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
+pub fn analyze(program: &Program) -> Result<(SymbolTable, Vec<CompileError>), Vec<CompileError>> {
     let mut symbols = SymbolTable::new();
     let mut error_collector = ErrorCollector::new();
     let mut tracker = UsageTracker::new();
@@ -504,22 +504,12 @@ pub fn analyze(program: &Program) -> Result<SymbolTable, Vec<CompileError>> {
         error_collector.push(warning.clone());
     }
 
-    // Temporarily print warnings to stderr for testing
-    if !warnings.is_empty() {
-        eprintln!("\n=== WARNINGS ===");
-        for warn in &warnings {
-            eprintln!("[WARNING] {}", warn.title);
-            if let Some(span) = warn.span {
-                eprintln!("  at line {}, column {}", span.start, span.end);
-            }
-        }
-        eprintln!("================\n");
-    }
-
     if error_collector.has_errors() {
-        error_collector.to_result().map(|_| symbols)
+        error_collector
+            .to_result()
+            .map(|_| (symbols, error_collector.warnings.clone()))
     } else {
-        Ok(symbols)
+        Ok((symbols, error_collector.warnings))
     }
 }
 

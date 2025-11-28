@@ -46,7 +46,18 @@ fn main() {
         Ok(program) => {
             // println!("{:#?}", program);
             match sema::analyze(&program) {
-                Ok(symbols) => {
+                Ok((symbols, warnings)) => {
+                    // Display warnings if any
+                    if !warnings.is_empty() {
+                        use error::*;
+                        let formatter = ErrorFormatter::new(code.clone(), args.input.clone());
+
+                        eprintln!(); // blank line before warnings
+                        for warning in &warnings {
+                            eprintln!("{}", formatter.format_compile_error(warning));
+                        }
+                    }
+
                     // println!("Semantic analysis passed");
                     use ast::{ActorMember, Definition};
                     use codegen::Codegen;
