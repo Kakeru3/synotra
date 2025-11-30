@@ -475,17 +475,23 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
                         }
                         _ => ExprKind::Call(Box::new(target.clone()), "invoke".to_string(), args),
                     },
-                    CallSuffix::Method(m, args) => {
-                        if let Some(args) = args {
-                            if m == "send" && args.len() == 1 {
+                    CallSuffix::Method(m, args_opt) => {
+                        if let Some(args) = args_opt {
+                            // Phase 5: send and ask are now handled differently
+                            // Old: target.send(message) or target.ask(message)
+                            // New: send target.method(args) or ask target.method(args)
+                            // For now, keep old behavior until we implement new syntax
+                            if m == "send" {
                                 ExprKind::Send {
                                     target: Box::new(target.clone()),
-                                    message: Box::new(args.into_iter().next().unwrap()),
+                                    method: "receive".to_string(), // Default method name
+                                    args,
                                 }
-                            } else if m == "ask" && args.len() == 1 {
+                            } else if m == "ask" {
                                 ExprKind::Ask {
                                     target: Box::new(target.clone()),
-                                    message: Box::new(args.into_iter().next().unwrap()),
+                                    method: "handle".to_string(), // Default method name
+                                    args,
                                 }
                             } else {
                                 ExprKind::Call(Box::new(target.clone()), m, args)

@@ -711,6 +711,17 @@ pub fn analyze_stmt(
                 analyze_expr(e, symbols, is_io_context, tracker)?;
             }
         }
+        StmtKind::Reply(expr) => {
+            // Phase 5: Reply can only be used in io fun
+            if !is_io_context {
+                return Err(CompileError::from_kind(ErrorKind::IOError {
+                    message: "Cannot use 'reply' in a pure function. Use 'io fun' instead."
+                        .to_string(),
+                })
+                .with_span(stmt.span));
+            }
+            analyze_expr(expr, symbols, is_io_context, tracker)?;
+        }
         StmtKind::If(cond, then_block, else_block) => {
             analyze_expr(cond, symbols, is_io_context, tracker)?;
             // TODO: Check cond is boolean
@@ -1222,7 +1233,11 @@ fn analyze_expr(
 
             Ok(Type::Int)
         }
-        ExprKind::Ask { target, message } => {
+        ExprKind::Ask {
+            target,
+            method,
+            args,
+        } => {
             // Check: ask() can only be used in IO context
             if !is_io_context {
                 return Err(CompileError::from_kind(ErrorKind::IOError {
@@ -1233,21 +1248,28 @@ fn analyze_expr(
             }
 
             let target_ty = analyze_expr(target, symbols, is_io_context, tracker)?;
-            let _msg_ty = analyze_expr(message, symbols, is_io_context, tracker)?;
+
+            // Analyze all args
+            for arg in args {
+                analyze_expr(arg, symbols, is_io_context, tracker)?;
+            }
 
             if let Type::ActorRef(_) = target_ty {
-                // Relaxed check: allow any message type for now
+                // TODO: Check method exists and return type matches
+                Ok(Type::Unknown) // Placeholder
             } else {
-                return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
+                Err(CompileError::from_kind(ErrorKind::TypeMismatch {
                     expected: "ActorRef".to_string(),
                     found: format!("{:?}", target_ty),
                 })
-                .with_span(target.span));
+                .with_span(target.span))
             }
-
-            Ok(Type::Unknown) // ask returns a value (placeholder)
         }
-        ExprKind::Send { target, message } => {
+        ExprKind::Send {
+            target,
+            method,
+            args,
+        } => {
             // Check: send() can only be used in IO context
             if !is_io_context {
                 return Err(CompileError::from_kind(ErrorKind::IOError {
@@ -1258,14 +1280,17 @@ fn analyze_expr(
             }
 
             let target_ty = analyze_expr(target, symbols, is_io_context, tracker)?;
-            let _msg_ty = analyze_expr(message, symbols, is_io_context, tracker)?;
+
+            // Analyze all args
+            for arg in args {
+                analyze_expr(arg, symbols, is_io_context, tracker)?;
+            }
 
             if let Type::ActorRef(_) = target_ty {
-                // Relaxed check: allow any message type for now
+                // send returns Unit
             } else {
-                return Err(CompileError::from_kind(ErrorKind::TypeMismatch {
-                    expected: "ActorRef".to_string(),
-                    found: format!("{:?}", target_ty),
+                return Err(CompileError::from_kind(ErrorKind::Other {
+                    message: format!("'send' requires an ActorRef target, found {:?}", target_ty),
                 })
                 .with_span(target.span));
             }

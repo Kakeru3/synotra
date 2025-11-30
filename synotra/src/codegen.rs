@@ -199,6 +199,11 @@ impl<'a> Codegen<'a> {
                 let val = expr.as_ref().map(|e| self.gen_expr(e));
                 self.current_block_mut().terminator = Terminator::Return(val);
             }
+            StmtKind::Reply(expr) => {
+                // Phase 5: Reply generates a return for now
+                let val = self.gen_expr(expr);
+                self.current_block_mut().terminator = Terminator::Return(Some(val));
+            }
             StmtKind::If(cond, then_block, else_block) => {
                 let cond_val = self.gen_expr(cond);
 
@@ -565,18 +570,19 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(res)
             }
-            ExprKind::Ask { target, message } => {
-                let target_val = self.gen_expr(target);
-                let msg_val = self.gen_expr(message);
-                let result_idx = self.alloc_temp();
-
-                self.current_block_mut().instrs.push(Instruction::Ask {
-                    result: result_idx,
-                    target: target_val,
-                    message: msg_val,
-                });
-
-                Value::Local(result_idx)
+            ExprKind::Ask {
+                target,
+                method,
+                args,
+            } => {
+                // Phase 5: ask now uses method-style syntax
+                let target_idx = self.gen_expr(target);
+                let mut arg_indices = Vec::new();
+                for arg in args {
+                    arg_indices.push(self.gen_expr(arg));
+                }
+                // TODO: Implement proper ask codegen with method name
+                target_idx // Placeholder
             }
             ExprKind::Spawn { actor_type, args } => {
                 // Generate argument values
@@ -594,16 +600,19 @@ impl<'a> Codegen<'a> {
 
                 Value::Local(result_idx)
             }
-            ExprKind::Send { target, message } => {
-                let target_val = self.gen_expr(target);
-                let msg_val = self.gen_expr(message);
-
-                self.current_block_mut().instrs.push(Instruction::Send {
-                    target: target_val,
-                    message: msg_val,
-                });
-
-                Value::ConstInt(0)
+            ExprKind::Send {
+                target,
+                method,
+                args,
+            } => {
+                // Phase 5: send now uses method-style syntax
+                let target_idx = self.gen_expr(target);
+                let mut arg_indices = Vec::new();
+                for arg in args {
+                    arg_indices.push(self.gen_expr(arg));
+                }
+                // TODO: Implement proper send codegen with method name
+                target_idx // Placeholder
             }
             ExprKind::FieldAccess(target, field_name) => {
                 let target_val = self.gen_expr(target);
