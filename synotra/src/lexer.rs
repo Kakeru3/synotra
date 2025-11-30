@@ -12,10 +12,6 @@ pub enum Token {
     Actor,
     #[token("class")]
     Class,
-    #[token("data")]
-    Data,
-    #[token("message")]
-    Message,
     #[token("fun")]
     Fun,
     #[token("val")]
@@ -24,11 +20,13 @@ pub enum Token {
     Var,
     #[token("io")]
     Io,
-    // Send and Ask are now identifiers (methods)
-    // #[token("send")]
-    // Send,
-    // #[token("ask")]
-    // Ask,
+    #[token("send")]
+    Send,
+    #[token("ask")]
+    Ask,
+    #[token("reply")]
+    Reply,
+    // data and message keywords removed in Phase 5
     #[token("crdt")]
     Crdt,
     #[token("module")]

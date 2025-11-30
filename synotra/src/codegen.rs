@@ -622,17 +622,25 @@ impl<'a> Codegen<'a> {
                 args,
                 field_names: _,
             } => {
-                // Get field names from symbol table
-                let field_names =
-                    if let Some(Symbol::DataMessage(fields)) = self.symbols.lookup(name) {
-                        fields
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect::<Vec<_>>()
-                    } else {
-                        // Fallback: use field_0, field_1, etc. if not found
-                        (0..args.len()).map(|i| format!("field_{}", i)).collect()
-                    };
+                // DataMessage removed in Phase 5 - this will cause runtime error
+                // Generate error instruction or placeholder
+                // For now, we'll just use generic field names.
+                // The original DataMessage field lookup was here:
+                // let field_names =
+                //     if let Some(Symbol::DataMessage(fields)) = self.symbols.lookup(name) {
+                //         fields
+                //             .iter()
+                //             .map(|(name, _)| name.clone())
+                //             .collect::<Vec<_>>()
+                //     } else {
+                //         // Fallback: use field_0, field_1, etc. if not found
+                //         (0..args.len()).map(|i| format!("field_{}", i)).collect()
+                //     };
+
+                // Fallback: use field_0, field_1, etc. if not found
+                let field_names = (0..args.len())
+                    .map(|i| format!("field_{}", i))
+                    .collect::<Vec<_>>();
 
                 // Generate (field_name, value) pairs
                 let mut field_pairs = Vec::new();

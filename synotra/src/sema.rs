@@ -67,7 +67,7 @@ pub enum Symbol {
     Function(Vec<Type>, Option<Type>, bool), // Params, Return, is_io
     Actor(String),
     Message(String),
-    DataMessage(Vec<(String, Type)>), // Fields with types
+    // DataMessage removed in Phase 5 - functions define message structure
 }
 
 impl SymbolTable {
@@ -333,7 +333,8 @@ fn validate_actorref_type(ty: &Type, symbols: &SymbolTable) -> Result<(), String
                 Type::UserDefined(name) => {
                     // Verify it's registered as a DataMessage or Actor in symbol table
                     match symbols.lookup(name) {
-                        Some(Symbol::DataMessage(_)) | Some(Symbol::Actor(_)) => Ok(()),
+                        // DataMessage removed in Phase 5
+                        Some(Symbol::Actor(_)) => Ok(()),
                         _ => Err(format!(
                             "ActorRef message type '{}' is not a valid data message or actor",
                             name
@@ -365,13 +366,8 @@ pub fn analyze(program: &Program) -> Result<(SymbolTable, Vec<CompileError>), Ve
     // 1. Register top-level definitions
     // First pass: Register all data messages
     for def in &program.definitions {
-        if let Definition::DataMessage(data_def) = def {
-            let fields: Vec<(String, Type)> = data_def
-                .fields
-                .iter()
-                .map(|f| (f.name.clone(), f.field_type.clone()))
-                .collect();
-            symbols.insert(data_def.name.clone(), Symbol::DataMessage(fields));
+        // DataMessage handling removed in Phase 5
+        if false { // Disabled DataMessage processing
         }
     }
 
@@ -392,7 +388,7 @@ pub fn analyze(program: &Program) -> Result<(SymbolTable, Vec<CompileError>), Ve
             Definition::Message(msg) => {
                 symbols.insert(msg.name.clone(), Symbol::Message(msg.name.clone()));
             }
-            Definition::DataMessage(_) => { /* Handled in first pass */ }
+            // Definition::DataMessage removed in Phase 5
             Definition::Function(func) => {
                 let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
                 symbols.insert(
@@ -1276,73 +1272,12 @@ fn analyze_expr(
 
             Ok(Type::Unit) // send returns Unit/Int (0)
         }
-        ExprKind::Construct {
-            name,
-            args,
-            field_names: _,
-        } => {
-            // Validate that 'name' is a registered data message
-            match symbols.lookup(name) {
-                Some(Symbol::DataMessage(fields)) => {
-                    // Clone fields to avoid borrow checker issues
-                    let fields = fields.clone();
-
-                    // Validate argument count
-                    if args.len() != fields.len() {
-                        return Err(CompileError::from_kind(ErrorKind::ArgumentCountMismatch {
-                            expected: fields.len(),
-                            found: args.len(),
-                        })
-                        .with_span(expr.span));
-                    }
-
-                    // Analyze and type-check each argument
-                    let mut errors = Vec::new();
-                    for (i, arg) in args.iter().enumerate() {
-                        match analyze_expr(arg, symbols, is_io_context, tracker) {
-                            Ok(arg_type) => {
-                                let expected_type = &fields[i].1;
-                                if !check_type_compatibility(&arg_type, expected_type) {
-                                    println!("DEBUG: TypeMismatch in Construct. Expected: {:?}, Found: {:?}", expected_type, arg_type);
-                                    errors.push(
-                                        CompileError::from_kind(ErrorKind::TypeMismatch {
-                                            expected: format!("{:?}", expected_type),
-                                            found: format!("{:?}", arg_type),
-                                        })
-                                        .with_span(arg.span),
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                errors.push(e);
-                            }
-                        }
-                    }
-
-                    // If there were any errors, return them all
-                    if !errors.is_empty() {
-                        // For now, return the first error. A more robust system would collect all.
-                        return Err(errors.remove(0));
-                    }
-
-                    // Return the constructed message type
-                    Ok(Type::UserDefined(name.clone()))
-                }
-                Some(_) => Err(CompileError::from_kind(ErrorKind::Other {
-                    message: format!("'{}' is not a data message", name),
-                })
-                .with_span(expr.span)),
-                None => {
-                    let mut err = CompileError::from_kind(ErrorKind::Other {
-                        message: format!("Undefined data message '{}'", name),
-                    })
-                    .with_span(expr.span);
-                    if let Some(suggestion) = find_suggestion(name, symbols) {
-                        err = err.with_suggestion(format!("Did you mean '{}'?", suggestion));
-                    }
-                    Err(err)
-                }
-            }
+        // ExprKind::Construct removed in Phase 5 - data messages no longer exist
+        ExprKind::Construct { .. } => {
+            // Return error - construct syntax no longer supported
+            Err(CompileError::from_kind(ErrorKind::Other {
+                message: "Data message construction is not supported in Phase 5. Use function calls instead.".to_string()
+            }).with_span(expr.span))
         }
         ExprKind::Spawn { actor_type, args } => {
             // Validate that actor_type is a registered actor
@@ -1373,24 +1308,14 @@ fn analyze_expr(
             let target_ty = analyze_expr(expr_inner, symbols, is_io_context, tracker)?;
             match target_ty {
                 Type::UserDefined(type_name) => {
-                    // Look up the type definition to find fields
-                    if let Some(Symbol::DataMessage(fields)) = symbols.lookup(&type_name) {
-                        for (fname, fty) in fields {
-                            if fname == field {
-                                return Ok(fty.clone());
-                            }
-                        }
-                        Err(CompileError::from_kind(ErrorKind::UnknownField {
-                            field: field.clone(),
-                            ty: type_name,
-                        })
-                        .with_span(expr.span))
-                    } else {
-                        Err(CompileError::from_kind(ErrorKind::Other {
-                            message: format!("Type '{}' does not have fields", type_name),
-                        })
-                        .with_span(expr.span))
-                    }
+                    // DataMessage removed in Phase 5 - field access not supported
+                    Err(CompileError::from_kind(ErrorKind::Other {
+                        message: format!(
+                            "Type '{}' does not have fields (data messages removed in Phase 5)",
+                            type_name
+                        ),
+                    })
+                    .with_span(expr.span))
                 }
                 _ => Err(CompileError::from_kind(ErrorKind::Other {
                     message: format!("Cannot access field '{}' on type {:?}", field, target_ty),

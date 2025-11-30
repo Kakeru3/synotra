@@ -703,22 +703,7 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         )
         .map(|(name, params)| MessageDef { name, params });
 
-    // Parse: data message Name(val field1: Type1, val field2: Type2, ...)
-    let data_field = just(Token::Val)
-        .ignore_then(ident.clone())
-        .then_ignore(just(Token::Colon))
-        .then(type_parser.clone())
-        .map(|(name, field_type)| DataField { name, field_type });
-
-    let data_message_def = just(Token::Data)
-        .ignore_then(just(Token::Message))
-        .ignore_then(ident.clone())
-        .then(
-            data_field
-                .separated_by(just(Token::Comma))
-                .delimited_by(just(Token::LParen), just(Token::RParen)),
-        )
-        .map(|(name, fields)| DataMessageDef { name, fields });
+    // data message removed in Phase 5 - functions define message structure
 
     let field_def = choice((just(Token::Var), just(Token::Val)))
         .then(ident.clone())
@@ -787,15 +772,16 @@ pub fn parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
 
     let definition = choice((
         import_def.map(Definition::Import),
-        data_message_def.map(Definition::DataMessage), // Must come before message_def
-        actor_def.map(Definition::Actor),
+        // data_message_def removed in Phase 5
         message_def.map(Definition::Message),
+        actor_def.map(Definition::Actor),
+        // module_def.map(Definition::Module), // Assuming module_def is not defined elsewhere in the original context
         function_def.map(Definition::Function),
     ))
     .recover_with(skip_then_retry_until([
         Token::Import,
-        Token::Data,
-        Token::Message,
+        // Token::Data removed in Phase 5
+        // Token::Message removed in Phase 5
         Token::Actor,
         Token::Fun,
         Token::Io,

@@ -23,7 +23,7 @@ pub enum Definition {
     Import(ImportDef),
     Actor(ActorDef),
     Message(MessageDef),
-    DataMessage(DataMessageDef), // data message Name(val field: Type, ...)
+    // DataMessage removed in Phase 5 - functions replace message types
     Function(FunctionDef),
     Module(ModuleDef),
 }
@@ -127,6 +127,7 @@ pub enum StmtKind {
     AssignIndex(String, Box<Expr>, Box<Expr>), // name[index] = value
     Expr(Expr),
     Return(Option<Expr>),
+    Reply(Expr), // Phase 5: reply statement for io fun
     // Send is now an expression
     If(Expr, Block, Option<Block>),
     While(Expr, Block),
@@ -147,13 +148,16 @@ pub enum ExprKind {
     Call(Box<Expr>, String, Vec<Expr>), // target.method(args) or func(args)
     Index(Box<Expr>, Box<Expr>),        // target[index]
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
+    // Phase 5: ask/send now use method-style syntax
     Ask {
         target: Box<Expr>,
-        message: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
     },
     Send {
         target: Box<Expr>,
-        message: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
     },
     FieldAccess(Box<Expr>, String), // target.field
     Construct {

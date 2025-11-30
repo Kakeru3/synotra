@@ -207,8 +207,8 @@ fn main() {
                         Some(Token::Return) => "`return` statement".to_string(),
                         Some(Token::Io) => "`io` keyword".to_string(),
                         Some(Token::Actor) => "actor definition".to_string(),
-                        Some(Token::Data) => "data definition".to_string(),
-                        Some(Token::Message) => "message definition".to_string(),
+                        // Token::Data removed in Phase 5
+                        // Token::Message removed in Phase 5
                         Some(Token::True) => "`true`".to_string(),
                         Some(Token::False) => "`false`".to_string(),
                         Some(Token::Ident(_)) => "identifier".to_string(),
